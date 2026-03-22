@@ -114,6 +114,22 @@ export default function TabWhatsApp({ companyId }: { companyId: string }) {
   const handleDisconnect = async () => {
     setQrUrl(null)
     setPolling(false)
+    setBotUrl(null)
+    try {
+      const { data: sessionData } = await supabase
+        .from('whatsapp_sessions')
+        .select('fly_app_url')
+        .eq('company_id', companyId)
+        .single()
+      if (sessionData?.fly_app_url) {
+        await fetch(`${sessionData.fly_app_url}/logout`, {
+          method: 'POST',
+          headers: { 'ngrok-skip-browser-warning': 'true' }
+        })
+      }
+    } catch {
+      // Si el bot no responde, igual actualizamos Supabase
+    }
     await supabase.from('whatsapp_sessions').upsert({
       company_id: companyId,
       status: 'disconnected',
