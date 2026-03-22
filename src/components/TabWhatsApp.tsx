@@ -25,9 +25,12 @@ export default function TabWhatsApp({ companyId }: { companyId: string }) {
   const [botUrl, setBotUrl] = useState<string | null>(null)
   const [countdown, setCountdown] = useState(QR_INTERVAL)
   const [qrFlash, setQrFlash] = useState(false)
+  const [qrExpired, setQrExpired] = useState(false)
   const [stats, setStats] = useState<Stats>({ todayMessages: 0, totalContacts: 0, totalMessages: 0 })
   const [restarting, setRestarting] = useState(false)
   const [restartCountdown, setRestartCountdown] = useState(RESTART_WAIT)
+  const [restartDone, setRestartDone] = useState(false)
+  const [confirmDisconnect, setConfirmDisconnect] = useState(false)
   const countdownRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const restartRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
@@ -61,45 +64,56 @@ export default function TabWhatsApp({ companyId }: { companyId: string }) {
     if (session.status === 'connected') fetchStats()
   }, [session.status])
 
-  // Poll Supabase every 5s to detect when WhatsApp connects
+  // Poll Supabase every 2s to detect when WhatsApp connects
   useEffect(() => {
     if (!polling) return
     const interval = setInterval(async () => {
       const data = await fetchSession()
       if (data?.status === 'connected') {
-        setQrUrl(null); setPolling(false); setBotUrl(null); setCountdown(QR_INTERVAL)
+        setQrUrl(null); setPolling(false); setBotUrl(null); setCountdown(QR_INTERVAL); setQrExpired(false)
         toast.success('¡WhatsApp conectado exitosamente!')
       }
     }, 2000)
     return () => clearInterval(interval)
   }, [polling])
 
-  // Countdown timer for QR
+  // Countdown timer for QR — stops at 0 and marks expired
   useEffect(() => {
     if (!qrUrl || !botUrl) {
       if (countdownRef.current) clearInterval(countdownRef.current)
       setCountdown(QR_INTERVAL)
+      setQrExpired(false)
       return
     }
     setCountdown(QR_INTERVAL)
+    setQrExpired(false)
     countdownRef.current = setInterval(() => {
-      setCountdown(prev => (prev <= 1 ? QR_INTERVAL : prev - 1))
+      setCountdown(prev => {
+        if (prev <= 1) {
+          clearInterval(countdownRef.current!)
+          setQrExpired(true)
+          return 0
+        }
+        return prev - 1
+      })
     }, 1000)
     return () => { if (countdownRef.current) clearInterval(countdownRef.current) }
   }, [qrUrl, botUrl])
 
-  // Restart countdown after disconnect
+  // Restart countdown after disconnect — shows message when done
   useEffect(() => {
     if (!restarting) {
       if (restartRef.current) clearInterval(restartRef.current)
       return
     }
     setRestartCountdown(RESTART_WAIT)
+    setRestartDone(false)
     restartRef.current = setInterval(() => {
       setRestartCountdown(prev => {
         if (prev <= 1) {
-          setRestarting(false)
           clearInterval(restartRef.current!)
+          setRestarting(false)
+          setRestartDone(true)
           return RESTART_WAIT
         }
         return prev - 1
@@ -108,29 +122,9 @@ export default function TabWhatsApp({ companyId }: { companyId: string }) {
     return () => { if (restartRef.current) clearInterval(restartRef.current) }
   }, [restarting])
 
-  // Refresh QR every 15 seconds
-  useEffect(() => {
-    if (!qrUrl || !botUrl) return
-    const refreshQR = async () => {
-      try {
-        const res = await fetch(`${botUrl}/qr`, { headers: { 'ngrok-skip-browser-warning': 'true' } })
-        const data = await res.json()
-        if (data.status === 'connected') {
-          setQrUrl(null); setPolling(false); setBotUrl(null)
-          fetchSession()
-          toast.success('¡WhatsApp conectado exitosamente!')
-        } else if (data.qr) {
-          setQrUrl(data.qr)
-          setQrFlash(true); setTimeout(() => setQrFlash(false), 400)
-        }
-      } catch { /* silently ignore */ }
-    }
-    const interval = setInterval(refreshQR, QR_INTERVAL * 1000)
-    return () => clearInterval(interval)
-  }, [qrUrl, botUrl])
-
   const handleShowQR = async () => {
     setLoadingQR(true)
+    setRestartDone(false)
     try {
       const { data: sessionData } = await supabase
         .from('whatsapp_sessions').select('fly_app_url').eq('company_id', companyId).single()
@@ -153,7 +147,8 @@ export default function TabWhatsApp({ companyId }: { companyId: string }) {
   }
 
   const handleDisconnect = async () => {
-    setQrUrl(null); setPolling(false); setBotUrl(null); setRestarting(true)
+    setConfirmDisconnect(false)
+    setQrUrl(null); setPolling(false); setBotUrl(null); setRestarting(true); setRestartDone(false)
     try {
       const { data: sessionData } = await supabase
         .from('whatsapp_sessions').select('fly_app_url').eq('company_id', companyId).single()
@@ -162,7 +157,7 @@ export default function TabWhatsApp({ companyId }: { companyId: string }) {
           method: 'POST', headers: { 'ngrok-skip-browser-warning': 'true' }
         })
       }
-    } catch { /* igual actualizamos Supabase */ }
+    } catch { }
     await supabase.from('whatsapp_sessions').upsert({
       company_id: companyId, status: 'disconnected', phone_number: null, updated_at: new Date().toISOString(),
     }, { onConflict: 'company_id' })
@@ -174,8 +169,15 @@ export default function TabWhatsApp({ companyId }: { companyId: string }) {
     try {
       const res = await fetch(`${botUrl}/qr`, { headers: { 'ngrok-skip-browser-warning': 'true' } })
       const data = await res.json()
+      if (data.status === 'connected') {
+        setQrUrl(null); setPolling(false); setBotUrl(null)
+        fetchSession()
+        toast.success('¡WhatsApp conectado exitosamente!')
+        return
+      }
       if (data.qr) {
-        setQrUrl(data.qr); setCountdown(QR_INTERVAL)
+        setQrUrl(data.qr)
+        setQrExpired(false)
         setQrFlash(true); setTimeout(() => setQrFlash(false), 400)
         toast.success('QR actualizado')
       }
@@ -218,7 +220,6 @@ export default function TabWhatsApp({ companyId }: { companyId: string }) {
             )}
           </div>
 
-          {/* Estadísticas */}
           <div className="grid grid-cols-3 gap-3 pt-2">
             <div className="bg-muted/50 rounded-xl p-3 text-center">
               <p className="text-2xl font-bold tabular-nums">{stats.todayMessages}</p>
@@ -234,14 +235,30 @@ export default function TabWhatsApp({ companyId }: { companyId: string }) {
             </div>
           </div>
 
-          <div className="pt-1">
-            <button
-              onClick={handleDisconnect}
-              className="text-xs text-muted-foreground hover:text-destructive transition-colors underline underline-offset-2"
-            >
-              Desvincular número
-            </button>
-          </div>
+          {/* Confirmación desvincular */}
+          {confirmDisconnect ? (
+            <div className="border border-destructive/30 rounded-xl p-4 space-y-3 bg-destructive/5">
+              <p className="text-sm font-medium text-destructive">¿Desvincular número?</p>
+              <p className="text-xs text-muted-foreground">El bot dejará de responder hasta que vuelvas a vincular.</p>
+              <div className="flex gap-2 justify-center">
+                <Button variant="outline" size="sm" onClick={() => setConfirmDisconnect(false)}>
+                  Cancelar
+                </Button>
+                <Button variant="destructive" size="sm" onClick={handleDisconnect}>
+                  Sí, desvincular
+                </Button>
+              </div>
+            </div>
+          ) : (
+            <div className="pt-1">
+              <button
+                onClick={() => setConfirmDisconnect(true)}
+                className="text-xs text-muted-foreground hover:text-destructive transition-colors underline underline-offset-2"
+              >
+                Desvincular número
+              </button>
+            </div>
+          )}
         </Card>
       )}
 
@@ -255,25 +272,34 @@ export default function TabWhatsApp({ companyId }: { companyId: string }) {
               El servidor se está reiniciando. Por favor espera antes de volver a vincular.
             </p>
           </div>
-
           <div className="flex flex-col items-center gap-2">
             <div className="flex items-baseline gap-1">
-              <span
-                className="font-bold tabular-nums"
-                style={{ fontSize: '3rem', lineHeight: 1, color: '#f59e0b' }}
-              >
+              <span className="font-bold tabular-nums" style={{ fontSize: '3rem', lineHeight: 1, color: '#f59e0b' }}>
                 {restartCountdown}
               </span>
               <span className="text-sm text-muted-foreground">seg</span>
             </div>
             <div className="w-64 h-2 bg-muted rounded-full overflow-hidden">
-              <div
-                className="h-full rounded-full bg-amber-400 transition-all duration-1000 ease-linear"
-                style={{ width: `${restartProgress}%` }}
-              />
+              <div className="h-full rounded-full bg-amber-400 transition-all duration-1000 ease-linear" style={{ width: `${restartProgress}%` }} />
             </div>
             <p className="text-xs text-muted-foreground">El botón aparecerá cuando el bot esté listo</p>
           </div>
+        </Card>
+      )}
+
+      {/* PANTALLA BOT LISTO PARA VINCULAR */}
+      {restartDone && !isConnected && !qrUrl && !restarting && (
+        <Card className="p-8 text-center space-y-5">
+          <div className="flex flex-col items-center gap-3">
+            <div className="w-20 h-20 rounded-full bg-blue-50 flex items-center justify-center text-4xl">✅</div>
+            <p className="text-xl font-medium">Bot listo</p>
+            <p className="text-sm text-muted-foreground max-w-xs">
+              El servidor está reiniciado y listo para vincular un nuevo número.
+            </p>
+          </div>
+          <Button className="w-full h-12 text-base" onClick={handleShowQR} disabled={loadingQR}>
+            {loadingQR ? 'Generando código QR...' : '📲 Vincular WhatsApp'}
+          </Button>
         </Card>
       )}
 
@@ -281,43 +307,62 @@ export default function TabWhatsApp({ companyId }: { companyId: string }) {
       {qrUrl && (
         <Card className="p-6 text-center space-y-4">
           <p className="font-medium text-lg">Escanea este código con WhatsApp</p>
+
           <div className="flex justify-center">
             <div className="rounded-xl border overflow-hidden" style={{ transition: 'opacity 0.2s ease', opacity: qrFlash ? 0.3 : 1 }}>
               <img src={qrUrl} alt="QR WhatsApp" className="w-64 h-64" />
             </div>
           </div>
+
+          {/* Contador o mensaje de expirado */}
           <div className="flex flex-col items-center gap-2">
-            <div className="flex items-baseline gap-1">
-              <span className="font-bold tabular-nums" style={{ fontSize: '3rem', lineHeight: 1, color: countdownColor, transition: 'color 0.3s ease' }}>
-                {countdown}
-              </span>
-              <span className="text-sm text-muted-foreground">seg</span>
+            {!qrExpired ? (
+              <>
+                <div className="flex items-baseline gap-1">
+                  <span className="font-bold tabular-nums" style={{ fontSize: '3rem', lineHeight: 1, color: countdownColor, transition: 'color 0.3s ease' }}>
+                    {countdown}
+                  </span>
+                  <span className="text-sm text-muted-foreground">seg</span>
+                </div>
+                <div className="w-64 h-2 bg-muted rounded-full overflow-hidden">
+                  <div className="h-full rounded-full transition-all duration-1000 ease-linear" style={{ width: `${progress}%`, backgroundColor: countdownColor }} />
+                </div>
+                <p className="text-xs text-muted-foreground">Escanea antes de que expire</p>
+              </>
+            ) : (
+              <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 space-y-1">
+                <p className="text-sm font-medium text-amber-700">⚠️ El código expiró</p>
+                <p className="text-xs text-amber-600">Presiona "Refrescar QR" para obtener uno nuevo</p>
+              </div>
+            )}
+          </div>
+
+          {!qrExpired && (
+            <div className="text-left space-y-1 bg-muted/50 rounded-lg p-4">
+              <p className="text-sm font-medium mb-2">¿Cómo escanear?</p>
+              <p className="text-sm text-muted-foreground">1. Abre WhatsApp en tu celular</p>
+              <p className="text-sm text-muted-foreground">2. Ve a <strong>Ajustes → Dispositivos vinculados</strong></p>
+              <p className="text-sm text-muted-foreground">3. Toca <strong>Vincular dispositivo</strong></p>
+              <p className="text-sm text-muted-foreground">4. Apunta la cámara al código de arriba</p>
             </div>
-            <div className="w-64 h-2 bg-muted rounded-full overflow-hidden">
-              <div className="h-full rounded-full transition-all duration-1000 ease-linear" style={{ width: `${progress}%`, backgroundColor: countdownColor }} />
+          )}
+
+          {!qrExpired && (
+            <div className="flex items-center justify-center gap-2 text-sm text-muted-foreground">
+              <div className="w-2 h-2 rounded-full bg-amber-400 animate-pulse" />
+              Esperando que escanees el código...
             </div>
-            <p className="text-xs text-muted-foreground">El QR se actualiza automáticamente</p>
-          </div>
-          <div className="text-left space-y-1 bg-muted/50 rounded-lg p-4">
-            <p className="text-sm font-medium mb-2">¿Cómo escanear?</p>
-            <p className="text-sm text-muted-foreground">1. Abre WhatsApp en tu celular</p>
-            <p className="text-sm text-muted-foreground">2. Ve a <strong>Ajustes → Dispositivos vinculados</strong></p>
-            <p className="text-sm text-muted-foreground">3. Toca <strong>Vincular dispositivo</strong></p>
-            <p className="text-sm text-muted-foreground">4. Apunta la cámara al código de arriba</p>
-          </div>
-          <div className="flex items-center justify-center gap-2 text-sm text-muted-foreground">
-            <div className="w-2 h-2 rounded-full bg-amber-400 animate-pulse" />
-            Esperando que escanees el código...
-          </div>
+          )}
+
           <div className="flex gap-2 justify-center">
             <Button variant="outline" size="sm" onClick={handleManualRefresh}>🔄 Refrescar QR</Button>
-            <Button variant="ghost" size="sm" onClick={() => { setQrUrl(null); setPolling(false); setBotUrl(null) }}>Cancelar</Button>
+            <Button variant="ghost" size="sm" onClick={() => { setQrUrl(null); setPolling(false); setBotUrl(null); setQrExpired(false) }}>Cancelar</Button>
           </div>
         </Card>
       )}
 
       {/* PANTALLA DESCONECTADO */}
-      {!isConnected && !qrUrl && !restarting && (
+      {!isConnected && !qrUrl && !restarting && !restartDone && (
         <Card className="p-8 text-center space-y-5">
           <div className="flex flex-col items-center gap-3">
             <div className="w-20 h-20 rounded-full bg-muted flex items-center justify-center text-4xl">📱</div>
