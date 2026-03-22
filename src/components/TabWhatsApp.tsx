@@ -8,7 +8,6 @@ import { toast } from 'sonner'
 import type { WhatsappSession } from '@/types'
 
 const QR_INTERVAL = 15
-const RESTART_WAIT = 30
 
 type Stats = {
   todayMessages: number
@@ -28,8 +27,8 @@ export default function TabWhatsApp({ companyId }: { companyId: string }) {
   const [qrExpired, setQrExpired] = useState(false)
   const [stats, setStats] = useState<Stats>({ todayMessages: 0, totalContacts: 0, totalMessages: 0 })
   const [restarting, setRestarting] = useState(false)
-  const [restartCountdown, setRestartCountdown] = useState(RESTART_WAIT)
-  const [restartDone, setRestartDone] = useState(false)
+  const [restartElapsed, setRestartElapsed] = useState(0)
+  const [restartBotUrl, setRestartBotUrl] = useState<string | null>(null)
   const [confirmDisconnect, setConfirmDisconnect] = useState(false)
   const countdownRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const restartRef = useRef<ReturnType<typeof setInterval> | null>(null)
@@ -100,31 +99,51 @@ export default function TabWhatsApp({ companyId }: { companyId: string }) {
     return () => { if (countdownRef.current) clearInterval(countdownRef.current) }
   }, [qrUrl, botUrl])
 
-  // Restart countdown after disconnect — shows message when done
+  // Poll bot every 3s after disconnect until QR is ready
   useEffect(() => {
-    if (!restarting) {
+    if (!restarting || !restartBotUrl) {
       if (restartRef.current) clearInterval(restartRef.current)
       return
     }
-    setRestartCountdown(RESTART_WAIT)
-    setRestartDone(false)
-    restartRef.current = setInterval(() => {
-      setRestartCountdown(prev => {
-        if (prev <= 1) {
-          clearInterval(restartRef.current!)
-          setRestarting(false)
-          setRestartDone(true)
-          return RESTART_WAIT
-        }
-        return prev - 1
-      })
+    setRestartElapsed(0)
+
+    // Elapsed timer — counts up every second
+    const elapsedInterval = setInterval(() => {
+      setRestartElapsed(prev => prev + 1)
     }, 1000)
-    return () => { if (restartRef.current) clearInterval(restartRef.current) }
-  }, [restarting])
+
+    // Poll bot every 3s for QR
+    restartRef.current = setInterval(async () => {
+      try {
+        const res = await fetch(`${restartBotUrl}/qr`, { headers: { 'ngrok-skip-browser-warning': 'true' } })
+        const data = await res.json()
+        if (data.qr) {
+          clearInterval(restartRef.current!)
+          clearInterval(elapsedInterval)
+          setRestarting(false)
+          setBotUrl(restartBotUrl)
+          setQrUrl(data.qr)
+          setPolling(true)
+          await supabase.from('whatsapp_sessions').upsert({
+            company_id: companyId, status: 'connecting', updated_at: new Date().toISOString(),
+          }, { onConflict: 'company_id' })
+        } else if (data.status === 'connected') {
+          clearInterval(restartRef.current!)
+          clearInterval(elapsedInterval)
+          setRestarting(false)
+          fetchSession()
+        }
+      } catch { /* bot aún no responde, seguir esperando */ }
+    }, 3000)
+
+    return () => {
+      if (restartRef.current) clearInterval(restartRef.current)
+      clearInterval(elapsedInterval)
+    }
+  }, [restarting, restartBotUrl])
 
   const handleShowQR = async () => {
     setLoadingQR(true)
-    setRestartDone(false)
     try {
       const { data: sessionData } = await supabase
         .from('whatsapp_sessions').select('fly_app_url').eq('company_id', companyId).single()
@@ -148,11 +167,12 @@ export default function TabWhatsApp({ companyId }: { companyId: string }) {
 
   const handleDisconnect = async () => {
     setConfirmDisconnect(false)
-    setQrUrl(null); setPolling(false); setBotUrl(null); setRestarting(true); setRestartDone(false)
+    setQrUrl(null); setPolling(false); setBotUrl(null)
     try {
       const { data: sessionData } = await supabase
         .from('whatsapp_sessions').select('fly_app_url').eq('company_id', companyId).single()
       if (sessionData?.fly_app_url) {
+        setRestartBotUrl(sessionData.fly_app_url)
         await fetch(`${sessionData.fly_app_url}/logout`, {
           method: 'POST', headers: { 'ngrok-skip-browser-warning': 'true' }
         })
@@ -162,6 +182,7 @@ export default function TabWhatsApp({ companyId }: { companyId: string }) {
       company_id: companyId, status: 'disconnected', phone_number: null, updated_at: new Date().toISOString(),
     }, { onConflict: 'company_id' })
     fetchSession()
+    setRestarting(true)
   }
 
   const handleManualRefresh = async () => {
@@ -189,7 +210,6 @@ export default function TabWhatsApp({ companyId }: { companyId: string }) {
   const isConnected = session.status === 'connected'
   const progress = (countdown / QR_INTERVAL) * 100
   const countdownColor = countdown <= 5 ? '#ef4444' : countdown <= 10 ? '#f59e0b' : '#22c55e'
-  const restartProgress = (restartCountdown / RESTART_WAIT) * 100
 
   return (
     <div className="space-y-6 max-w-lg mx-auto">
@@ -266,42 +286,35 @@ export default function TabWhatsApp({ companyId }: { companyId: string }) {
       {restarting && !isConnected && !qrUrl && (
         <Card className="p-8 text-center space-y-5">
           <div className="flex flex-col items-center gap-3">
-            <div className="w-20 h-20 rounded-full bg-amber-50 flex items-center justify-center text-4xl">⚙️</div>
+            <div className="w-20 h-20 rounded-full bg-amber-50 flex items-center justify-center text-4xl animate-spin" style={{ animationDuration: '3s' }}>⚙️</div>
             <p className="text-xl font-medium">Reiniciando bot...</p>
             <p className="text-sm text-muted-foreground max-w-xs">
-              El servidor se está reiniciando. Por favor espera antes de volver a vincular.
+              El QR aparecerá automáticamente cuando el bot esté listo.
             </p>
           </div>
           <div className="flex flex-col items-center gap-2">
             <div className="flex items-baseline gap-1">
               <span className="font-bold tabular-nums" style={{ fontSize: '3rem', lineHeight: 1, color: '#f59e0b' }}>
-                {restartCountdown}
+                {restartElapsed}
               </span>
               <span className="text-sm text-muted-foreground">seg</span>
             </div>
-            <div className="w-64 h-2 bg-muted rounded-full overflow-hidden">
-              <div className="h-full rounded-full bg-amber-400 transition-all duration-1000 ease-linear" style={{ width: `${restartProgress}%` }} />
+            <div className="w-64 h-1.5 bg-muted rounded-full overflow-hidden">
+              <div
+                className="h-full rounded-full bg-amber-400"
+                style={{
+                  width: '30%',
+                  animation: 'slide 1.5s ease-in-out infinite alternate',
+                }}
+              />
             </div>
-            <p className="text-xs text-muted-foreground">El botón aparecerá cuando el bot esté listo</p>
+            <style>{`@keyframes slide { from { margin-left: 0% } to { margin-left: 70% } }`}</style>
+            <p className="text-xs text-muted-foreground">Verificando cada 3 segundos...</p>
           </div>
         </Card>
       )}
 
-      {/* PANTALLA BOT LISTO PARA VINCULAR */}
-      {restartDone && !isConnected && !qrUrl && !restarting && (
-        <Card className="p-8 text-center space-y-5">
-          <div className="flex flex-col items-center gap-3">
-            <div className="w-20 h-20 rounded-full bg-blue-50 flex items-center justify-center text-4xl">✅</div>
-            <p className="text-xl font-medium">Bot listo</p>
-            <p className="text-sm text-muted-foreground max-w-xs">
-              El servidor está reiniciado y listo para vincular un nuevo número.
-            </p>
-          </div>
-          <Button className="w-full h-12 text-base" onClick={handleShowQR} disabled={loadingQR}>
-            {loadingQR ? 'Generando código QR...' : '📲 Vincular WhatsApp'}
-          </Button>
-        </Card>
-      )}
+
 
       {/* PANTALLA QR */}
       {qrUrl && (
@@ -362,7 +375,7 @@ export default function TabWhatsApp({ companyId }: { companyId: string }) {
       )}
 
       {/* PANTALLA DESCONECTADO */}
-      {!isConnected && !qrUrl && !restarting && !restartDone && (
+      {!isConnected && !qrUrl && !restarting && (
         <Card className="p-8 text-center space-y-5">
           <div className="flex flex-col items-center gap-3">
             <div className="w-20 h-20 rounded-full bg-muted flex items-center justify-center text-4xl">📱</div>
