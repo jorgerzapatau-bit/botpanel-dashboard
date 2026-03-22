@@ -321,16 +321,16 @@ export default function TabWhatsApp({ companyId }: { companyId: string }) {
         <Card className="p-6 text-center space-y-4">
           <p className="font-medium text-lg">Escanea este código con WhatsApp</p>
 
-          <div className="flex justify-center">
-            <div className="rounded-xl border overflow-hidden" style={{ transition: 'opacity 0.2s ease', opacity: qrFlash ? 0.3 : 1 }}>
-              <img src={qrUrl} alt="QR WhatsApp" className="w-64 h-64" />
-            </div>
-          </div>
+          {/* QR o pantalla de expirado */}
+          {!qrExpired ? (
+            <>
+              <div className="flex justify-center">
+                <div className="rounded-xl border overflow-hidden" style={{ transition: 'opacity 0.2s ease', opacity: qrFlash ? 0.3 : 1 }}>
+                  <img src={qrUrl} alt="QR WhatsApp" className="w-64 h-64" />
+                </div>
+              </div>
 
-          {/* Contador o mensaje de expirado */}
-          <div className="flex flex-col items-center gap-2">
-            {!qrExpired ? (
-              <>
+              <div className="flex flex-col items-center gap-2">
                 <div className="flex items-baseline gap-1">
                   <span className="font-bold tabular-nums" style={{ fontSize: '3rem', lineHeight: 1, color: countdownColor, transition: 'color 0.3s ease' }}>
                     {countdown}
@@ -341,29 +341,23 @@ export default function TabWhatsApp({ companyId }: { companyId: string }) {
                   <div className="h-full rounded-full transition-all duration-1000 ease-linear" style={{ width: `${progress}%`, backgroundColor: countdownColor }} />
                 </div>
                 <p className="text-xs text-muted-foreground">Escanea antes de que expire</p>
-              </>
-            ) : (
-              <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 space-y-1">
-                <p className="text-sm font-medium text-amber-700">⚠️ El código expiró</p>
-                <p className="text-xs text-amber-600">Presiona "Refrescar QR" para obtener uno nuevo</p>
               </div>
-            )}
-          </div>
 
-          {!qrExpired && (
-            <div className="text-left space-y-1 bg-muted/50 rounded-lg p-4">
-              <p className="text-sm font-medium mb-2">¿Cómo escanear?</p>
-              <p className="text-sm text-muted-foreground">1. Abre WhatsApp en tu celular</p>
-              <p className="text-sm text-muted-foreground">2. Ve a <strong>Ajustes → Dispositivos vinculados</strong></p>
-              <p className="text-sm text-muted-foreground">3. Toca <strong>Vincular dispositivo</strong></p>
-              <p className="text-sm text-muted-foreground">4. Apunta la cámara al código de arriba</p>
-            </div>
-          )}
-
-          {!qrExpired && (
-            <div className="flex items-center justify-center gap-2 text-sm text-muted-foreground">
-              <div className="w-2 h-2 rounded-full bg-amber-400 animate-pulse" />
-              Esperando que escanees el código...
+              <div className="flex items-center justify-center gap-2 text-sm text-muted-foreground">
+                <div className="w-2 h-2 rounded-full bg-amber-400 animate-pulse" />
+                Esperando que escanees el código...
+              </div>
+            </>
+          ) : (
+            <div className="flex flex-col items-center gap-4 py-6">
+              <div className="w-20 h-20 rounded-full bg-amber-50 flex items-center justify-center text-4xl">⏱️</div>
+              <div className="space-y-1 text-center">
+                <p className="text-lg font-medium text-amber-700">El código expiró</p>
+                <p className="text-sm text-muted-foreground">Genera un nuevo código para continuar</p>
+              </div>
+              <Button className="h-12 px-8 text-base" onClick={handleManualRefresh}>
+                🔄 Obtener nuevo código QR
+              </Button>
             </div>
           )}
 
@@ -376,14 +370,24 @@ export default function TabWhatsApp({ companyId }: { companyId: string }) {
 
       {/* PANTALLA DESCONECTADO */}
       {!isConnected && !qrUrl && !restarting && (
-        <Card className="p-8 text-center space-y-5">
-          <div className="flex flex-col items-center gap-3">
+        <Card className="p-6 space-y-5">
+          <div className="flex flex-col items-center gap-3 text-center">
             <div className="w-20 h-20 rounded-full bg-muted flex items-center justify-center text-4xl">📱</div>
             <p className="text-xl font-medium">Sin conectar</p>
             <p className="text-sm text-muted-foreground max-w-xs">
               Vincula tu número de WhatsApp para que el bot empiece a responder a tus clientes automáticamente
             </p>
           </div>
+
+          <div className="bg-muted/50 rounded-lg p-4 space-y-1">
+            <p className="text-sm font-medium mb-2">¿Cómo vincular?</p>
+            <p className="text-sm text-muted-foreground">1. Presiona el botón de abajo</p>
+            <p className="text-sm text-muted-foreground">2. Abre WhatsApp en tu celular</p>
+            <p className="text-sm text-muted-foreground">3. Ve a <strong>Ajustes → Dispositivos vinculados</strong></p>
+            <p className="text-sm text-muted-foreground">4. Toca <strong>Vincular dispositivo</strong></p>
+            <p className="text-sm text-muted-foreground">5. Apunta la cámara al código QR que aparecerá</p>
+          </div>
+
           <Button className="w-full h-12 text-base" onClick={handleShowQR} disabled={loadingQR}>
             {loadingQR ? 'Generando código QR...' : '📲 Vincular WhatsApp'}
           </Button>
