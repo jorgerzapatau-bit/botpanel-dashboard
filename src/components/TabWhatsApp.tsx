@@ -1,11 +1,13 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef } from 'react'
 import { supabase } from '@/lib/supabase'
 import { Card } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { toast } from 'sonner'
 import type { WhatsappSession } from '@/types'
+
+const QR_INTERVAL = 15
 
 export default function TabWhatsApp({ companyId }: { companyId: string }) {
   const [session, setSession] = useState<Partial<WhatsappSession>>({ status: 'disconnected' })
@@ -14,6 +16,9 @@ export default function TabWhatsApp({ companyId }: { companyId: string }) {
   const [loadingQR, setLoadingQR] = useState(false)
   const [polling, setPolling] = useState(false)
   const [botUrl, setBotUrl] = useState<string | null>(null)
+  const [countdown, setCountdown] = useState(QR_INTERVAL)
+  const [qrFlash, setQrFlash] = useState(false)
+  const countdownRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   const fetchSession = async () => {
     const { data } = await supabase
@@ -37,13 +42,33 @@ export default function TabWhatsApp({ companyId }: { companyId: string }) {
         setQrUrl(null)
         setPolling(false)
         setBotUrl(null)
+        setCountdown(QR_INTERVAL)
         toast.success('¡WhatsApp conectado exitosamente!')
       }
     }, 5000)
     return () => clearInterval(interval)
   }, [polling])
 
-  // Refresh QR image every 15 seconds while showing it
+  // Countdown timer
+  useEffect(() => {
+    if (!qrUrl || !botUrl) {
+      if (countdownRef.current) clearInterval(countdownRef.current)
+      setCountdown(QR_INTERVAL)
+      return
+    }
+    setCountdown(QR_INTERVAL)
+    countdownRef.current = setInterval(() => {
+      setCountdown(prev => {
+        if (prev <= 1) return QR_INTERVAL
+        return prev - 1
+      })
+    }, 1000)
+    return () => {
+      if (countdownRef.current) clearInterval(countdownRef.current)
+    }
+  }, [qrUrl, botUrl])
+
+  // Refresh QR every 15 seconds while showing it
   useEffect(() => {
     if (!qrUrl || !botUrl) return
     const refreshQR = async () => {
@@ -60,12 +85,14 @@ export default function TabWhatsApp({ companyId }: { companyId: string }) {
           toast.success('¡WhatsApp conectado exitosamente!')
         } else if (data.qr) {
           setQrUrl(data.qr)
+          setQrFlash(true)
+          setTimeout(() => setQrFlash(false), 400)
         }
       } catch {
         // Silently ignore refresh errors
       }
     }
-    const interval = setInterval(refreshQR, 15000)
+    const interval = setInterval(refreshQR, QR_INTERVAL * 1000)
     return () => clearInterval(interval)
   }, [qrUrl, botUrl])
 
@@ -140,9 +167,27 @@ export default function TabWhatsApp({ companyId }: { companyId: string }) {
     toast.success('Sesión desconectada')
   }
 
+  const handleManualRefresh = async () => {
+    if (!botUrl) return
+    try {
+      const res = await fetch(`${botUrl}/qr`, { headers: { 'ngrok-skip-browser-warning': 'true' } })
+      const data = await res.json()
+      if (data.qr) {
+        setQrUrl(data.qr)
+        setCountdown(QR_INTERVAL)
+        setQrFlash(true)
+        setTimeout(() => setQrFlash(false), 400)
+        toast.success('QR actualizado')
+      }
+    } catch {
+      toast.error('No se pudo actualizar el QR')
+    }
+  }
+
   if (loading) return <p className="text-sm text-muted-foreground">Cargando...</p>
 
   const isConnected = session.status === 'connected'
+  const progress = (countdown / QR_INTERVAL) * 100
 
   return (
     <div className="space-y-6 max-w-lg mx-auto">
@@ -176,11 +221,53 @@ export default function TabWhatsApp({ companyId }: { companyId: string }) {
       )}
 
       {qrUrl && (
-        <Card className="p-6 text-center space-y-5">
+        <Card className="p-6 text-center space-y-4">
           <p className="font-medium text-lg">Escanea este código con WhatsApp</p>
+
+          {/* QR con flash al refrescar */}
           <div className="flex justify-center">
-            <img src={qrUrl} alt="QR WhatsApp" className="w-64 h-64 rounded-xl border" />
+            <div
+              className="rounded-xl border overflow-hidden"
+              style={{
+                transition: 'opacity 0.2s ease',
+                opacity: qrFlash ? 0.3 : 1,
+              }}
+            >
+              <img src={qrUrl} alt="QR WhatsApp" className="w-64 h-64" />
+            </div>
           </div>
+
+          {/* Contador regresivo grande */}
+          <div className="flex flex-col items-center gap-2">
+            <div className="flex items-baseline gap-1">
+              <span
+                className="font-bold tabular-nums"
+                style={{
+                  fontSize: '3rem',
+                  lineHeight: 1,
+                  color: countdown <= 5 ? '#ef4444' : countdown <= 10 ? '#f59e0b' : '#22c55e',
+                  transition: 'color 0.3s ease',
+                }}
+              >
+                {countdown}
+              </span>
+              <span className="text-sm text-muted-foreground">seg</span>
+            </div>
+
+            {/* Barra de progreso */}
+            <div className="w-64 h-2 bg-muted rounded-full overflow-hidden">
+              <div
+                className="h-full rounded-full transition-all duration-1000 ease-linear"
+                style={{
+                  width: `${progress}%`,
+                  backgroundColor: countdown <= 5 ? '#ef4444' : countdown <= 10 ? '#f59e0b' : '#22c55e',
+                }}
+              />
+            </div>
+            <p className="text-xs text-muted-foreground">El QR se actualiza automáticamente</p>
+          </div>
+
+          {/* Instrucciones */}
           <div className="text-left space-y-1 bg-muted/50 rounded-lg p-4">
             <p className="text-sm font-medium mb-2">¿Cómo escanear?</p>
             <p className="text-sm text-muted-foreground">1. Abre WhatsApp en tu celular</p>
@@ -188,19 +275,14 @@ export default function TabWhatsApp({ companyId }: { companyId: string }) {
             <p className="text-sm text-muted-foreground">3. Toca <strong>Vincular dispositivo</strong></p>
             <p className="text-sm text-muted-foreground">4. Apunta la cámara al código de arriba</p>
           </div>
+
           <div className="flex items-center justify-center gap-2 text-sm text-muted-foreground">
             <div className="w-2 h-2 rounded-full bg-amber-400 animate-pulse" />
-            Esperando que escanees el código... (se actualiza cada 15 seg)
+            Esperando que escanees el código...
           </div>
+
           <div className="flex gap-2 justify-center">
-            <Button variant="outline" size="sm" onClick={async () => {
-              if (!botUrl) return
-              try {
-                const res = await fetch(`${botUrl}/qr`, { headers: { 'ngrok-skip-browser-warning': 'true' } })
-                const data = await res.json()
-                if (data.qr) { setQrUrl(data.qr); toast.success('QR actualizado') }
-              } catch { toast.error('No se pudo actualizar el QR') }
-            }}>
+            <Button variant="outline" size="sm" onClick={handleManualRefresh}>
               🔄 Refrescar QR
             </Button>
             <Button variant="ghost" size="sm" onClick={() => { setQrUrl(null); setPolling(false); setBotUrl(null) }}>
