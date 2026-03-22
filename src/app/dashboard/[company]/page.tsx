@@ -10,6 +10,7 @@ import { Toaster } from '@/components/ui/sonner'
 import { toast } from 'sonner'
 import type { Company } from '@/types'
 
+import TabDashboard from '@/components/TabDashboard'
 import TabPrompt from '@/components/TabPrompt'
 import TabFlows from '@/components/TabFlows'
 import TabHistory from '@/components/TabHistory'
@@ -78,13 +79,18 @@ export default function DashboardPage() {
 
       {/* Tabs */}
       <main className="max-w-4xl mx-auto px-4 py-8">
-        <Tabs defaultValue="prompt">
+        <Tabs defaultValue="dashboard">
           <TabsList className="w-full mb-6">
+            <TabsTrigger value="dashboard" className="flex-1">Dashboard</TabsTrigger>
             <TabsTrigger value="prompt" className="flex-1">Asistente IA</TabsTrigger>
             <TabsTrigger value="flows" className="flex-1">Flujos</TabsTrigger>
             <TabsTrigger value="history" className="flex-1">Historial</TabsTrigger>
             <TabsTrigger value="whatsapp" className="flex-1">WhatsApp</TabsTrigger>
           </TabsList>
+
+          <TabsContent value="dashboard">
+            <TabDashboard companyId={company!.id} />
+          </TabsContent>
 
           <TabsContent value="prompt">
             <TabPrompt companyId={company!.id} />
