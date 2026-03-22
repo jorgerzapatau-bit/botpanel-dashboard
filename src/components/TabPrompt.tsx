@@ -39,7 +39,9 @@ export default function TabPrompt({ companyId }: { companyId: string }) {
   const [hasConfig, setHasConfig] = useState(false)
   const [knowledgeList, setKnowledgeList] = useState<BotKnowledge[]>([])
   const [newKnowledge, setNewKnowledge] = useState({ name: '', content: '' })
+  const [showNewForm, setShowNewForm] = useState(false)
   const [editingKnowledge, setEditingKnowledge] = useState<BotKnowledge | null>(null)
+  const [confirmDelete, setConfirmDelete] = useState<string | null>(null)
   const [loadingConfig, setLoadingConfig] = useState(true)
   const [savingConfig, setSavingConfig] = useState(false)
   const [savingKnowledge, setSavingKnowledge] = useState(false)
@@ -113,8 +115,7 @@ export default function TabPrompt({ companyId }: { companyId: string }) {
     if (!file) return
     const reader = new FileReader()
     reader.onload = (ev) => {
-      const text = ev.target?.result as string
-      setConfig({ ...config, personality_prompt: text })
+      setConfig({ ...config, personality_prompt: ev.target?.result as string })
       toast.success(`Archivo "${file.name}" cargado`)
     }
     reader.readAsText(file)
@@ -126,8 +127,7 @@ export default function TabPrompt({ companyId }: { companyId: string }) {
     if (!file) return
     const reader = new FileReader()
     reader.onload = (ev) => {
-      const text = ev.target?.result as string
-      setNewKnowledge({ ...newKnowledge, content: text })
+      setNewKnowledge({ ...newKnowledge, content: ev.target?.result as string })
       toast.success(`Archivo "${file.name}" cargado`)
     }
     reader.readAsText(file)
@@ -139,8 +139,7 @@ export default function TabPrompt({ companyId }: { companyId: string }) {
     if (!file || !editingKnowledge) return
     const reader = new FileReader()
     reader.onload = (ev) => {
-      const text = ev.target?.result as string
-      setEditingKnowledge({ ...editingKnowledge, content: text })
+      setEditingKnowledge({ ...editingKnowledge, content: ev.target?.result as string })
       toast.success(`Archivo "${file.name}" cargado`)
     }
     reader.readAsText(file)
@@ -162,8 +161,9 @@ export default function TabPrompt({ companyId }: { companyId: string }) {
     if (error) {
       toast.error('Error al guardar')
     } else {
-      toast.success('Conocimiento agregado')
+      toast.success('Campaña agregada')
       setNewKnowledge({ name: '', content: '' })
+      setShowNewForm(false)
       fetchKnowledge()
     }
     setSavingKnowledge(false)
@@ -184,7 +184,7 @@ export default function TabPrompt({ companyId }: { companyId: string }) {
     if (error) {
       toast.error('Error al guardar')
     } else {
-      toast.success('Conocimiento actualizado')
+      toast.success('Campaña actualizada')
       setEditingKnowledge(null)
       fetchKnowledge()
     }
@@ -192,21 +192,22 @@ export default function TabPrompt({ companyId }: { companyId: string }) {
   }
 
   const handleActivate = async (id: string) => {
-    await supabase
-      .from('bot_knowledge')
-      .update({ active: false })
-      .eq('company_id', companyId)
-    await supabase
-      .from('bot_knowledge')
-      .update({ active: true })
-      .eq('id', id)
-    toast.success('Modo activado')
+    await supabase.from('bot_knowledge').update({ active: false }).eq('company_id', companyId)
+    await supabase.from('bot_knowledge').update({ active: true }).eq('id', id)
+    toast.success('✅ Campaña activada. El bot ya responde con este contenido.')
     fetchKnowledge()
   }
 
   const handleDeleteKnowledge = async (id: string) => {
+    const k = knowledgeList.find(k => k.id === id)
+    if (k?.active) {
+      toast.error('No puedes eliminar la campaña activa. Activa otra primero.')
+      setConfirmDelete(null)
+      return
+    }
     await supabase.from('bot_knowledge').delete().eq('id', id)
-    toast.success('Eliminado')
+    toast.success('Campaña eliminada')
+    setConfirmDelete(null)
     fetchKnowledge()
   }
 
@@ -221,7 +222,7 @@ export default function TabPrompt({ companyId }: { companyId: string }) {
           <div>
             <h2 className="text-lg font-medium">Personalidad del bot</h2>
             <p className="text-sm text-muted-foreground">
-              Define cómo se llama, cómo habla y cómo se comporta tu bot
+              Define cómo se llama, cómo habla y cómo transfiere a un asesor
             </p>
           </div>
           {hasConfig && !editingPersonality && (
@@ -231,59 +232,52 @@ export default function TabPrompt({ companyId }: { companyId: string }) {
           )}
         </div>
 
-        {/* Vista resumida */}
+        {/* Vista resumida cuando no está editando */}
         {hasConfig && !editingPersonality && (
           <Card className="p-5 space-y-3">
             <div className="grid grid-cols-2 gap-4">
               <div>
-                <p className="text-xs text-muted-foreground">Nombre</p>
-                <p className="text-sm font-medium">{config.bot_name || '—'}</p>
+                <p className="text-xs text-muted-foreground">Nombre del bot</p>
+                <p className="text-sm font-medium mt-0.5">{config.bot_name || '—'}</p>
               </div>
               <div>
-                <p className="text-xs text-muted-foreground">Bienvenida</p>
-                <p className="text-sm font-medium line-clamp-1">{config.welcome_message || '—'}</p>
+                <p className="text-xs text-muted-foreground">Asesor de transferencia</p>
+                <p className="text-sm font-medium mt-0.5">{config.advisor_phone ? `+${config.advisor_phone}` : '—'}</p>
+              </div>
+              <div>
+                <p className="text-xs text-muted-foreground">Longitud de respuesta</p>
+                <p className="text-sm font-medium mt-0.5 capitalize">{config.style || '—'}</p>
+              </div>
+              <div>
+                <p className="text-xs text-muted-foreground">Creatividad</p>
+                <p className="text-sm font-medium mt-0.5 capitalize">{config.creativity || '—'}</p>
               </div>
             </div>
-            <div>
-              <p className="text-xs text-muted-foreground mb-1">Personalidad</p>
-              <p className="text-sm text-muted-foreground line-clamp-2">
-                {config.personality_prompt || '—'}
-              </p>
-            </div>
-            <div className="flex items-center justify-between">
-              <div className="flex gap-2">
-                <Badge variant="secondary">
-                  {STYLE_OPTIONS.find(s => s.value === config.style)?.label || 'Medio'}
-                </Badge>
-                <Badge variant="secondary">
-                  {CREATIVITY_OPTIONS.find(c => c.value === config.creativity)?.label || 'Balanceado'}
-                </Badge>
+            {config.welcome_message && (
+              <div>
+                <p className="text-xs text-muted-foreground">Mensaje de bienvenida</p>
+                <p className="text-sm mt-0.5 line-clamp-2">{config.welcome_message}</p>
               </div>
-              {config.advisor_phone && (
-                <p className="text-xs text-muted-foreground">
-                  Asesor: +{config.advisor_phone}
-                </p>
-              )}
-            </div>
+            )}
           </Card>
         )}
 
         {/* Formulario de edición */}
         {editingPersonality && (
-          <Card className="p-6 space-y-5">
+          <Card className="p-6 space-y-6">
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-1.5">
                 <Label>Nombre del bot</Label>
                 <Input
-                  placeholder="TonyFit, Asistente, Sofia..."
+                  placeholder="Ej: Claudia, Asistente NutriSport..."
                   value={config.bot_name || ''}
                   onChange={e => setConfig({ ...config, bot_name: e.target.value })}
                 />
               </div>
               <div className="space-y-1.5">
-                <Label>Mensaje de bienvenida</Label>
+                <Label>Mensaje de bienvenida <span className="text-muted-foreground font-normal">(opcional)</span></Label>
                 <Input
-                  placeholder="¡Hola! ¿En qué te puedo ayudar?"
+                  placeholder="Hola, soy Claudia 👋 ¿En qué te ayudo?"
                   value={config.welcome_message || ''}
                   onChange={e => setConfig({ ...config, welcome_message: e.target.value })}
                 />
@@ -292,7 +286,7 @@ export default function TabPrompt({ companyId }: { companyId: string }) {
 
             <div className="space-y-2">
               <div className="flex items-center justify-between">
-                <Label>Personalidad y tono</Label>
+                <Label>Personalidad e instrucciones</Label>
                 <div className="flex gap-2">
                   <Button type="button" variant="outline" size="sm"
                     onClick={() => setConfig({ ...config, personality_prompt: PERSONALITY_TEMPLATE })}>
@@ -311,26 +305,21 @@ export default function TabPrompt({ companyId }: { companyId: string }) {
                 </div>
               </div>
               <Textarea
-                placeholder="Ej: Eres un asesor amable y profesional..."
-                className="min-h-[160px] font-mono text-sm"
+                placeholder="Eres un asistente de NutriSport Pro. Eres amable, profesional y ayudas a los clientes a encontrar el suplemento ideal..."
+                className="min-h-[120px]"
                 value={config.personality_prompt || ''}
                 onChange={e => setConfig({ ...config, personality_prompt: e.target.value })}
               />
-              <p className="text-xs text-muted-foreground">
-                Define el tono, el idioma y las reglas de comportamiento del bot
-              </p>
             </div>
 
             <div className="space-y-3">
-              <Label>Longitud de respuestas</Label>
+              <Label>Longitud de respuesta</Label>
               <div className="grid grid-cols-3 gap-3">
                 {STYLE_OPTIONS.map(opt => (
                   <button key={opt.value}
                     onClick={() => setConfig({ ...config, style: opt.value })}
                     className={`p-3 rounded-lg border text-left transition-all ${
-                      config.style === opt.value
-                        ? 'border-primary bg-primary/5'
-                        : 'border-border hover:border-primary/50'
+                      config.style === opt.value ? 'border-primary bg-primary/5' : 'border-border hover:border-primary/50'
                     }`}>
                     <p className="text-sm font-medium">{opt.label}</p>
                     <p className="text-xs text-muted-foreground mt-0.5">{opt.desc}</p>
@@ -340,15 +329,13 @@ export default function TabPrompt({ companyId }: { companyId: string }) {
             </div>
 
             <div className="space-y-3">
-              <Label>Estilo de respuesta</Label>
+              <Label>Creatividad</Label>
               <div className="grid grid-cols-3 gap-3">
                 {CREATIVITY_OPTIONS.map(opt => (
                   <button key={opt.value}
                     onClick={() => setConfig({ ...config, creativity: opt.value })}
                     className={`p-3 rounded-lg border text-left transition-all ${
-                      config.creativity === opt.value
-                        ? 'border-primary bg-primary/5'
-                        : 'border-border hover:border-primary/50'
+                      config.creativity === opt.value ? 'border-primary bg-primary/5' : 'border-border hover:border-primary/50'
                     }`}>
                     <p className="text-sm font-medium">{opt.label}</p>
                     <p className="text-xs text-muted-foreground mt-0.5">{opt.desc}</p>
@@ -359,7 +346,6 @@ export default function TabPrompt({ companyId }: { companyId: string }) {
 
             <Separator />
 
-            {/* Transferencia a asesor */}
             <div className="space-y-4">
               <div>
                 <p className="text-sm font-medium">Transferencia a asesor humano</p>
@@ -403,29 +389,39 @@ export default function TabPrompt({ companyId }: { companyId: string }) {
 
       <Separator />
 
-      {/* SECCIÓN 2: CONOCIMIENTO */}
+      {/* SECCIÓN 2: CAMPAÑAS */}
       <div className="space-y-4">
-        <div>
-          <h2 className="text-lg font-medium">Conocimiento del bot</h2>
-          <p className="text-sm text-muted-foreground">
-            Agrega lo que tu bot debe saber. Solo uno puede estar activo a la vez.
-          </p>
+        <div className="flex items-center justify-between">
+          <div>
+            <h2 className="text-lg font-medium">Campañas</h2>
+            <p className="text-sm text-muted-foreground">
+              Solo una campaña puede estar activa. El bot cambia de contenido al instante.
+            </p>
+          </div>
+          <Button size="sm" onClick={() => { setShowNewForm(true); setEditingKnowledge(null) }}>
+            + Nueva campaña
+          </Button>
         </div>
 
+        {/* Lista de campañas */}
         <div className="space-y-3">
-          {knowledgeList.length === 0 && (
-            <p className="text-sm text-muted-foreground text-center py-4">
-              Aún no hay conocimientos. Agrega el primero abajo.
-            </p>
+          {knowledgeList.length === 0 && !showNewForm && (
+            <Card className="p-8 text-center space-y-3">
+              <p className="text-2xl">📋</p>
+              <p className="text-sm font-medium">No hay campañas aún</p>
+              <p className="text-sm text-muted-foreground">Crea tu primera campaña para que el bot sepa qué responder</p>
+              <Button size="sm" onClick={() => setShowNewForm(true)}>+ Crear primera campaña</Button>
+            </Card>
           )}
+
           {knowledgeList.map(k => (
-            <Card key={k.id} className={`p-4 ${k.active ? 'ring-1 ring-primary' : ''}`}>
+            <Card key={k.id} className={`p-4 transition-all ${k.active ? 'ring-1 ring-green-400 bg-green-50/30' : ''}`}>
               {editingKnowledge?.id === k.id ? (
                 <div className="space-y-3">
                   <Input
                     value={editingKnowledge.name}
                     onChange={e => setEditingKnowledge({ ...editingKnowledge, name: e.target.value })}
-                    placeholder="Nombre"
+                    placeholder="Nombre de la campaña"
                   />
                   <div className="space-y-2">
                     <div className="flex justify-end gap-2">
@@ -448,43 +444,58 @@ export default function TabPrompt({ companyId }: { companyId: string }) {
                       value={editingKnowledge.content}
                       onChange={e => setEditingKnowledge({ ...editingKnowledge, content: e.target.value })}
                       className="min-h-[200px] font-mono text-sm"
-                      placeholder="Contenido del conocimiento..."
+                      placeholder="Contenido de la campaña..."
                     />
                   </div>
                   <div className="flex gap-2">
-                    <Button variant="outline" size="sm" className="flex-1"
-                      onClick={() => setEditingKnowledge(null)}>
+                    <Button variant="outline" size="sm" className="flex-1" onClick={() => setEditingKnowledge(null)}>
                       Cancelar
                     </Button>
-                    <Button size="sm" className="flex-1" disabled={savingKnowledge}
-                      onClick={handleSaveEditKnowledge}>
+                    <Button size="sm" className="flex-1" disabled={savingKnowledge} onClick={handleSaveEditKnowledge}>
                       {savingKnowledge ? 'Guardando...' : 'Guardar cambios'}
                     </Button>
                   </div>
                 </div>
               ) : (
                 <div className="flex items-start justify-between gap-4">
-                  <div className="flex-1 space-y-1">
+                  <div className="flex-1 space-y-1.5">
                     <div className="flex items-center gap-2">
                       <span className="text-sm font-medium">{k.name}</span>
-                      {k.active && <Badge>Activo</Badge>}
+                      {k.active && (
+                        <Badge className="bg-green-100 text-green-700 border-green-200 text-xs">
+                          ● Activa ahora
+                        </Badge>
+                      )}
                     </div>
                     <p className="text-xs text-muted-foreground line-clamp-2">{k.content}</p>
                   </div>
-                  <div className="flex gap-2 shrink-0">
+                  <div className="flex items-center gap-1 shrink-0">
                     {!k.active && (
                       <Button variant="outline" size="sm" onClick={() => handleActivate(k.id)}>
                         Activar
                       </Button>
                     )}
-                    <Button variant="ghost" size="sm" onClick={() => setEditingKnowledge(k)}>
+                    <Button variant="ghost" size="sm" onClick={() => { setEditingKnowledge(k); setConfirmDelete(null) }}>
                       Editar
                     </Button>
-                    <Button variant="ghost" size="sm"
-                      className="text-destructive hover:text-destructive"
-                      onClick={() => handleDeleteKnowledge(k.id)}>
-                      Eliminar
-                    </Button>
+                    {confirmDelete === k.id ? (
+                      <div className="flex gap-1">
+                        <Button variant="ghost" size="sm" onClick={() => setConfirmDelete(null)}>
+                          Cancelar
+                        </Button>
+                        <Button variant="ghost" size="sm"
+                          className="text-destructive hover:text-destructive"
+                          onClick={() => handleDeleteKnowledge(k.id)}>
+                          Confirmar
+                        </Button>
+                      </div>
+                    ) : (
+                      <Button variant="ghost" size="sm"
+                        className="text-destructive hover:text-destructive"
+                        onClick={() => setConfirmDelete(k.id)}>
+                        Eliminar
+                      </Button>
+                    )}
                   </div>
                 </div>
               )}
@@ -492,47 +503,56 @@ export default function TabPrompt({ companyId }: { companyId: string }) {
           ))}
         </div>
 
-        <Card className="p-6 space-y-4">
-          <p className="text-sm font-medium">Agregar nuevo conocimiento</p>
-          <div className="space-y-1.5">
-            <Label>Nombre</Label>
-            <Input
-              placeholder="Ej: Catálogo normal, Promoción verano, Menú del día..."
-              value={newKnowledge.name}
-              onChange={e => setNewKnowledge({ ...newKnowledge, name: e.target.value })}
-            />
-          </div>
-          <div className="space-y-2">
+        {/* Formulario nueva campaña */}
+        {showNewForm && (
+          <Card className="p-6 space-y-4 border-dashed">
             <div className="flex items-center justify-between">
-              <Label>Contenido</Label>
-              <div className="flex gap-2">
-                <Button type="button" variant="outline" size="sm"
-                  onClick={() => setNewKnowledge({ ...newKnowledge, content: KNOWLEDGE_TEMPLATE })}>
-                  Usar plantilla
-                </Button>
-                <Button type="button" variant="outline" size="sm"
-                  onClick={() => knowledgeFileRef.current?.click()}>
-                  Cargar .txt
-                </Button>
-                <Button type="button" variant="ghost" size="sm"
-                  onClick={() => setNewKnowledge({ ...newKnowledge, content: '' })}>
-                  Limpiar
-                </Button>
-                <input ref={knowledgeFileRef} type="file" accept=".txt"
-                  className="hidden" onChange={handleKnowledgeFile} />
-              </div>
+              <p className="text-sm font-medium">Nueva campaña</p>
+              <button onClick={() => { setShowNewForm(false); setNewKnowledge({ name: '', content: '' }) }}
+                className="text-xs text-muted-foreground hover:text-foreground transition-colors">
+                ✕ Cancelar
+              </button>
             </div>
-            <Textarea
-              placeholder="Lista tus productos, precios, servicios, horarios, políticas..."
-              className="min-h-[160px] font-mono text-sm"
-              value={newKnowledge.content}
-              onChange={e => setNewKnowledge({ ...newKnowledge, content: e.target.value })}
-            />
-          </div>
-          <Button onClick={handleAddKnowledge} disabled={savingKnowledge} className="w-full">
-            {savingKnowledge ? 'Guardando...' : '+ Agregar conocimiento'}
-          </Button>
-        </Card>
+            <div className="space-y-1.5">
+              <Label>Nombre de la campaña</Label>
+              <Input
+                placeholder="Ej: Catálogo normal, Promoción verano, Menú del día..."
+                value={newKnowledge.name}
+                onChange={e => setNewKnowledge({ ...newKnowledge, name: e.target.value })}
+              />
+            </div>
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <Label>Contenido</Label>
+                <div className="flex gap-2">
+                  <Button type="button" variant="outline" size="sm"
+                    onClick={() => setNewKnowledge({ ...newKnowledge, content: KNOWLEDGE_TEMPLATE })}>
+                    Usar plantilla
+                  </Button>
+                  <Button type="button" variant="outline" size="sm"
+                    onClick={() => knowledgeFileRef.current?.click()}>
+                    Cargar .txt
+                  </Button>
+                  <Button type="button" variant="ghost" size="sm"
+                    onClick={() => setNewKnowledge({ ...newKnowledge, content: '' })}>
+                    Limpiar
+                  </Button>
+                  <input ref={knowledgeFileRef} type="file" accept=".txt"
+                    className="hidden" onChange={handleKnowledgeFile} />
+                </div>
+              </div>
+              <Textarea
+                placeholder="Lista tus productos, precios, servicios, horarios, políticas..."
+                className="min-h-[160px] font-mono text-sm"
+                value={newKnowledge.content}
+                onChange={e => setNewKnowledge({ ...newKnowledge, content: e.target.value })}
+              />
+            </div>
+            <Button onClick={handleAddKnowledge} disabled={savingKnowledge} className="w-full">
+              {savingKnowledge ? 'Guardando...' : '+ Agregar campaña'}
+            </Button>
+          </Card>
+        )}
       </div>
     </div>
   )
