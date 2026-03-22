@@ -13,6 +13,7 @@ export default function TabWhatsApp({ companyId }: { companyId: string }) {
   const [loading, setLoading] = useState(true)
   const [loadingQR, setLoadingQR] = useState(false)
   const [polling, setPolling] = useState(false)
+  const [botUrl, setBotUrl] = useState<string | null>(null)
 
   const fetchSession = async () => {
     const { data } = await supabase
@@ -27,6 +28,7 @@ export default function TabWhatsApp({ companyId }: { companyId: string }) {
 
   useEffect(() => { fetchSession() }, [companyId])
 
+  // Poll Supabase every 5s to detect when WhatsApp connects
   useEffect(() => {
     if (!polling) return
     const interval = setInterval(async () => {
@@ -34,11 +36,38 @@ export default function TabWhatsApp({ companyId }: { companyId: string }) {
       if (data?.status === 'connected') {
         setQrUrl(null)
         setPolling(false)
+        setBotUrl(null)
         toast.success('¡WhatsApp conectado exitosamente!')
       }
     }, 5000)
     return () => clearInterval(interval)
   }, [polling])
+
+  // Refresh QR image every 15 seconds while showing it
+  useEffect(() => {
+    if (!qrUrl || !botUrl) return
+    const refreshQR = async () => {
+      try {
+        const res = await fetch(`${botUrl}/qr`, {
+          headers: { 'ngrok-skip-browser-warning': 'true' }
+        })
+        const data = await res.json()
+        if (data.status === 'connected') {
+          setQrUrl(null)
+          setPolling(false)
+          setBotUrl(null)
+          fetchSession()
+          toast.success('¡WhatsApp conectado exitosamente!')
+        } else if (data.qr) {
+          setQrUrl(data.qr)
+        }
+      } catch {
+        // Silently ignore refresh errors
+      }
+    }
+    const interval = setInterval(refreshQR, 15000)
+    return () => clearInterval(interval)
+  }, [qrUrl, botUrl])
 
   const handleShowQR = async () => {
     setLoadingQR(true)
@@ -49,22 +78,23 @@ export default function TabWhatsApp({ companyId }: { companyId: string }) {
         .eq('company_id', companyId)
         .single()
 
-      const botUrl = sessionData?.fly_app_url
-      if (!botUrl) {
+      const url = sessionData?.fly_app_url
+      if (!url) {
         toast.error('El bot no está configurado. Contacta al administrador.')
         setLoadingQR(false)
         return
       }
 
-    const res = await fetch(`${botUrl}/qr`, {
-      headers: { 'ngrok-skip-browser-warning': 'true' }
-    })
+      const res = await fetch(`${url}/qr`, {
+        headers: { 'ngrok-skip-browser-warning': 'true' }
+      })
       const data = await res.json()
 
       if (data.status === 'connected') {
         toast.success('¡Ya estás conectado!')
         fetchSession()
       } else if (data.qr) {
+        setBotUrl(url)
         setQrUrl(data.qr)
         setPolling(true)
         await supabase.from('whatsapp_sessions').upsert({
@@ -144,11 +174,23 @@ export default function TabWhatsApp({ companyId }: { companyId: string }) {
           </div>
           <div className="flex items-center justify-center gap-2 text-sm text-muted-foreground">
             <div className="w-2 h-2 rounded-full bg-amber-400 animate-pulse" />
-            Esperando que escanees el código...
+            Esperando que escanees el código... (se actualiza cada 15 seg)
           </div>
-          <Button variant="ghost" size="sm" onClick={() => { setQrUrl(null); setPolling(false) }}>
-            Cancelar
-          </Button>
+          <div className="flex gap-2 justify-center">
+            <Button variant="outline" size="sm" onClick={async () => {
+              if (!botUrl) return
+              try {
+                const res = await fetch(`${botUrl}/qr`, { headers: { 'ngrok-skip-browser-warning': 'true' } })
+                const data = await res.json()
+                if (data.qr) { setQrUrl(data.qr); toast.success('QR actualizado') }
+              } catch { toast.error('No se pudo actualizar el QR') }
+            }}>
+              🔄 Refrescar QR
+            </Button>
+            <Button variant="ghost" size="sm" onClick={() => { setQrUrl(null); setPolling(false); setBotUrl(null) }}>
+              Cancelar
+            </Button>
+          </div>
         </Card>
       )}
 
