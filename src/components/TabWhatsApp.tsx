@@ -78,12 +78,14 @@ export default function TabWhatsApp({ companyId }: { companyId: string }) {
 
   // Countdown timer for QR — stops at 0 and marks expired
   useEffect(() => {
-    if (!qrUrl || !botUrl) {
+    if (!qrUrl) {
       if (countdownRef.current) clearInterval(countdownRef.current)
       setCountdown(QR_INTERVAL)
       setQrExpired(false)
       return
     }
+    // Reset and start countdown every time qrUrl changes (new QR received)
+    if (countdownRef.current) clearInterval(countdownRef.current)
     setCountdown(QR_INTERVAL)
     setQrExpired(false)
     countdownRef.current = setInterval(() => {
@@ -97,7 +99,7 @@ export default function TabWhatsApp({ companyId }: { companyId: string }) {
       })
     }, 1000)
     return () => { if (countdownRef.current) clearInterval(countdownRef.current) }
-  }, [qrUrl, botUrl])
+  }, [qrUrl])
 
   // Poll bot every 3s after disconnect until QR is ready
   useEffect(() => {
