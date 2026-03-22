@@ -70,7 +70,7 @@ export default function TabWhatsApp({ companyId }: { companyId: string }) {
         setQrUrl(null); setPolling(false); setBotUrl(null); setCountdown(QR_INTERVAL)
         toast.success('¡WhatsApp conectado exitosamente!')
       }
-    }, 5000)
+    }, 2000)
     return () => clearInterval(interval)
   }, [polling])
 
