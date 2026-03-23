@@ -147,13 +147,34 @@ function BarChart({ data, onDayClick }: { data: DayBar[], onDayClick?: (date: st
   )
 }
 
+type SubscriptionInfo = {
+  end_date: string
+  status: string
+  plan: string
+  monthly_cost: number | null
+} | null
+
+function daysUntil(dateStr: string) {
+  const now = new Date(); now.setHours(0, 0, 0, 0)
+  const end = new Date(dateStr + 'T00:00:00')
+  return Math.ceil((end.getTime() - now.getTime()) / (1000 * 60 * 60 * 24))
+}
+
+function formatDate(iso: string) {
+  return new Date(iso + 'T00:00:00').toLocaleDateString('es-MX', {
+    day: '2-digit', month: 'long', year: 'numeric',
+  })
+}
+
 // ─── Componente principal ─────────────────────────────────────────────────────
 export default function TabDashboard({
   companyId,
   onDayClick,
+  subscription,
 }: {
   companyId: string
   onDayClick?: (date: string) => void
+  subscription?: SubscriptionInfo
 }) {
   const [campaignStats, setCampaignStats] = useState<CampaignStats[]>([])
   const [globalStats, setGlobalStats] = useState<GlobalStats>({
@@ -300,6 +321,45 @@ export default function TabDashboard({
           {isConnected ? `Bot activo · +${session.phone_number}` : 'Bot desconectado'}
         </div>
       </div>
+
+      {/* ─── Membresía ─────────────────────────────────────────────── */}
+      {subscription && (() => {
+        const days = daysUntil(subscription.end_date)
+        const isExpired = subscription.status === 'expired'
+        const color = isExpired
+          ? 'border-red-200 bg-red-50 text-red-700'
+          : days <= 2
+          ? 'border-red-200 bg-red-50 text-red-700'
+          : days <= 4
+          ? 'border-orange-200 bg-orange-50 text-orange-700'
+          : days <= 7
+          ? 'border-yellow-200 bg-yellow-50 text-yellow-700'
+          : 'border-border bg-muted/40 text-muted-foreground'
+
+        return (
+          <div className={`flex items-center justify-between px-4 py-3 rounded-xl border text-sm ${color}`}>
+            <div className="flex items-center gap-3 flex-wrap">
+              <span>📅 Membresía activa hasta</span>
+              <span className="font-semibold text-foreground">{formatDate(subscription.end_date)}</span>
+              {subscription.monthly_cost != null && (
+                <>
+                  <span className="opacity-40">·</span>
+                  <span>${subscription.monthly_cost.toLocaleString('es-MX')} MXN/mes</span>
+                </>
+              )}
+            </div>
+            <span className="font-bold shrink-0 ml-4">
+              {isExpired
+                ? '⚠️ Vencida'
+                : days <= 0
+                ? '⚠️ Vence hoy'
+                : days === 1
+                ? '1 día restante'
+                : `${days} días restantes`}
+            </span>
+          </div>
+        )
+      })()}
 
       {/* Estadísticas globales */}
       <div>
