@@ -1,7 +1,7 @@
 'use client'
 
-import { useState, useEffect, Suspense } from 'react'
-import { useSearchParams, useRouter } from 'next/navigation'
+import { useState, useEffect } from 'react'
+import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import { Card } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -10,52 +10,54 @@ import { Button } from '@/components/ui/button'
 import { Toaster } from '@/components/ui/sonner'
 import { toast } from 'sonner'
 
-function LoginContent() {
-  const searchParams = useSearchParams()
-  const router = useRouter()
-  const company = searchParams.get('company') || ''
+const ADMIN_EMAIL = 'ramzapata@gmail.com'
 
+export default function AdminLoginPage() {
+  const router = useRouter()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
-  const [loading, setLoading] = useState(false)
-  const [companyName, setCompanyName] = useState('')
+  const [loading, setLoading] = useState(true)
+  const [submitting, setSubmitting] = useState(false)
 
   useEffect(() => {
-    // If no ?company= param, redirect to admin
-    if (!company) {
-      router.push('/admin')
-      return
-    }
-
-    supabase
-      .from('companies')
-      .select('name')
-      .eq('slug', company)
-      .single()
-      .then(({ data }) => {
-        if (data) setCompanyName(data.name)
-      })
-  }, [company, router])
+    // If already logged in as admin, go straight to dashboard
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (session?.user?.email === ADMIN_EMAIL) {
+        router.push('/admin/dashboard')
+      } else {
+        setLoading(false)
+      }
+    })
+  }, [router])
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault()
-    setLoading(true)
+    setSubmitting(true)
 
-    const { error } = await supabase.auth.signInWithPassword({ email, password })
-
-    if (error) {
-      toast.error('Credenciales incorrectas')
-      setLoading(false)
+    // First check email before even trying auth
+    if (email.toLowerCase() !== ADMIN_EMAIL) {
+      toast.error('Acceso no autorizado')
+      setSubmitting(false)
       return
     }
 
-    router.push(`/dashboard/${company}`)
+    const { data, error } = await supabase.auth.signInWithPassword({ email, password })
+
+    if (error || data.user?.email !== ADMIN_EMAIL) {
+      // Sign out just in case something slipped through
+      await supabase.auth.signOut()
+      toast.error('Credenciales incorrectas')
+      setSubmitting(false)
+      return
+    }
+
+    router.push('/admin/dashboard')
   }
 
-  if (!company) {
+  if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
-        <p className="text-sm text-muted-foreground">Redirigiendo...</p>
+        <p className="text-sm text-muted-foreground">Cargando...</p>
       </div>
     )
   }
@@ -65,12 +67,8 @@ function LoginContent() {
       <Toaster />
       <div className="w-full max-w-sm space-y-6">
         <div className="text-center space-y-1">
-          <div className="text-3xl font-semibold tracking-tight">
-            {companyName || 'BotPanel'}
-          </div>
-          <p className="text-sm text-muted-foreground">
-            Accede al panel de tu chatbot
-          </p>
+          <div className="text-2xl font-semibold tracking-tight">BotPanel</div>
+          <p className="text-sm text-muted-foreground">Panel de administración</p>
         </div>
 
         <Card className="p-6">
@@ -80,10 +78,11 @@ function LoginContent() {
               <Input
                 id="email"
                 type="email"
-                placeholder="tu@empresa.com"
+                placeholder="admin@correo.com"
                 value={email}
                 onChange={e => setEmail(e.target.value)}
                 required
+                autoComplete="email"
               />
             </div>
             <div className="space-y-1.5">
@@ -95,30 +94,15 @@ function LoginContent() {
                 value={password}
                 onChange={e => setPassword(e.target.value)}
                 required
+                autoComplete="current-password"
               />
             </div>
-            <Button type="submit" className="w-full" disabled={loading}>
-              {loading ? 'Entrando...' : 'Entrar'}
+            <Button type="submit" className="w-full" disabled={submitting}>
+              {submitting ? 'Verificando...' : 'Entrar'}
             </Button>
           </form>
         </Card>
-
-        <p className="text-center text-xs text-muted-foreground">
-          Accediendo como <span className="font-medium">{company}</span>
-        </p>
       </div>
     </div>
-  )
-}
-
-export default function LoginPage() {
-  return (
-    <Suspense fallback={
-      <div className="min-h-screen flex items-center justify-center">
-        <p className="text-sm text-muted-foreground">Cargando...</p>
-      </div>
-    }>
-      <LoginContent />
-    </Suspense>
   )
 }
