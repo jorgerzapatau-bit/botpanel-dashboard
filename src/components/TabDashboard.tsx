@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef } from 'react'
 import { supabase } from '@/lib/supabase'
 import { Card } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -25,80 +25,90 @@ type DayBar = {
   label: string
   date: string
   count: number
+  peakHour: number | null
+  peakCount: number
 }
 
-type PeakHour = {
+type GlobalPeak = {
   hour: number
   count: number
 }
 
-// ─── Gráfica de barras SVG (sin dependencias externas) ────────────────────────
+function formatHour(h: number) {
+  const ampm = h >= 12 ? 'pm' : 'am'
+  const h12 = h % 12 === 0 ? 12 : h % 12
+  return `${h12}:00 ${ampm}`
+}
+
+// ─── Gráfica de barras con tooltip ────────────────────────────────────────────
 function BarChart({ data }: { data: DayBar[] }) {
+  const [hovered, setHovered] = useState<number | null>(null)
+  const [tooltipPos, setTooltipPos] = useState({ x: 0, y: 0 })
+  const containerRef = useRef<HTMLDivElement>(null)
+
   const maxCount = Math.max(...data.map(d => d.count), 1)
-  const chartH = 80
-  const barW = 28
-  const gap = 10
+  const chartH = 100
+  const barW = 36
+  const gap = 12
   const totalW = data.length * (barW + gap) - gap
 
+  const handleMouseMove = (e: React.MouseEvent<HTMLDivElement>, i: number) => {
+    const rect = containerRef.current?.getBoundingClientRect()
+    if (!rect) return
+    setHovered(i)
+    setTooltipPos({ x: e.clientX - rect.left, y: e.clientY - rect.top })
+  }
+
+  const bar = hovered !== null ? data[hovered] : null
+
   return (
-    <div className="w-full">
+    <div ref={containerRef} className="w-full relative select-none" onMouseLeave={() => setHovered(null)}>
       <svg
-        viewBox={`0 0 ${totalW} ${chartH + 28}`}
+        viewBox={`0 0 ${totalW} ${chartH + 32}`}
         width="100%"
-        aria-label="Mensajes por día"
+        style={{ overflow: 'visible' }}
       >
         {data.map((d, i) => {
-          const barH = maxCount > 0 ? Math.max((d.count / maxCount) * chartH, d.count > 0 ? 4 : 0) : 0
+          const barH = Math.max((d.count / maxCount) * chartH, d.count > 0 ? 6 : 0)
           const x = i * (barW + gap)
           const y = chartH - barH
           const isToday = i === data.length - 1
+          const isHovered = hovered === i
 
           return (
             <g key={d.date}>
-              {/* Barra de fondo (siempre visible) */}
+              {/* Zona hover invisible (toda la altura) */}
               <rect
-                x={x}
-                y={0}
-                width={barW}
-                height={chartH}
-                rx={4}
-                fill="currentColor"
-                className="text-muted/40"
+                x={x} y={0}
+                width={barW} height={chartH + 28}
+                fill="transparent"
+                style={{ cursor: d.count > 0 ? 'pointer' : 'default' }}
+                onMouseMove={(e) => handleMouseMove(e as unknown as React.MouseEvent<HTMLDivElement>, i)}
               />
-              {/* Barra de datos */}
+              {/* Barra fondo */}
+              <rect
+                x={x} y={0}
+                width={barW} height={chartH}
+                rx={6}
+                fill={isHovered ? '#e2e8f0' : '#f1f5f9'}
+              />
+              {/* Barra datos */}
               {barH > 0 && (
                 <rect
-                  x={x}
-                  y={y}
-                  width={barW}
-                  height={barH}
-                  rx={4}
-                  fill="currentColor"
-                  className={isToday ? 'text-foreground' : 'text-muted-foreground/50'}
+                  x={x} y={y}
+                  width={barW} height={barH}
+                  rx={6}
+                  fill={isToday ? (isHovered ? '#3f3f46' : '#18181b') : (isHovered ? '#64748b' : '#94a3b8')}
                 />
-              )}
-              {/* Valor encima */}
-              {d.count > 0 && (
-                <text
-                  x={x + barW / 2}
-                  y={y - 4}
-                  textAnchor="middle"
-                  fontSize={9}
-                  fill="currentColor"
-                  className="text-muted-foreground"
-                >
-                  {d.count}
-                </text>
               )}
               {/* Etiqueta día */}
               <text
                 x={x + barW / 2}
-                y={chartH + 16}
+                y={chartH + 20}
                 textAnchor="middle"
-                fontSize={10}
-                fontWeight={isToday ? '600' : '400'}
-                fill="currentColor"
-                className={isToday ? 'text-foreground' : 'text-muted-foreground'}
+                fontSize={11}
+                fontWeight={isToday ? '700' : '400'}
+                fill={isToday ? '#18181b' : '#94a3b8'}
               >
                 {d.label}
               </text>
@@ -106,6 +116,39 @@ function BarChart({ data }: { data: DayBar[] }) {
           )
         })}
       </svg>
+
+      {/* Tooltip HTML */}
+      {bar && (
+        <div
+          className="absolute z-50 pointer-events-none"
+          style={{
+            left: tooltipPos.x + 14,
+            top: Math.max(tooltipPos.y - 60, 0),
+            transform: tooltipPos.x > 220 ? 'translateX(-120%)' : undefined,
+          }}
+        >
+          <div className="bg-popover border border-border rounded-xl shadow-lg px-3.5 py-2.5 text-sm min-w-[140px]">
+            <p className="font-semibold text-foreground mb-1.5">{bar.label}</p>
+            {bar.count > 0 ? (
+              <>
+                <p className="text-muted-foreground leading-tight">
+                  <span className="text-lg font-bold text-foreground tabular-nums">{bar.count}</span>
+                  {' '}{bar.count === 1 ? 'mensaje' : 'mensajes'}
+                </p>
+                {bar.peakHour !== null && (
+                  <p className="text-xs text-muted-foreground mt-1.5 pt-1.5 border-t border-border">
+                    Hora pico{' '}
+                    <span className="font-semibold text-foreground">{formatHour(bar.peakHour)}</span>
+                    <span className="ml-1 opacity-70">({bar.peakCount})</span>
+                  </p>
+                )}
+              </>
+            ) : (
+              <p className="text-xs text-muted-foreground">Sin actividad</p>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   )
 }
@@ -118,12 +161,11 @@ export default function TabDashboard({ companyId }: { companyId: string }) {
   })
   const [session, setSession] = useState<Partial<WhatsappSession>>({ status: 'disconnected' })
   const [chartData, setChartData] = useState<DayBar[]>([])
-  const [peakHour, setPeakHour] = useState<PeakHour | null>(null)
+  const [globalPeak, setGlobalPeak] = useState<GlobalPeak | null>(null)
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
     const load = async () => {
-      // WhatsApp session
       const { data: sessionData } = await supabase
         .from('whatsapp_sessions')
         .select('*')
@@ -131,14 +173,12 @@ export default function TabDashboard({ companyId }: { companyId: string }) {
         .single()
       if (sessionData) setSession(sessionData)
 
-      // Campaigns
       const { data: campaigns } = await supabase
         .from('bot_knowledge')
         .select('*')
         .eq('company_id', companyId)
         .order('created_at', { ascending: true })
 
-      // Todos los mensajes
       const { data: allMessages } = await supabase
         .from('chat_history')
         .select('phone_number, role, created_at, knowledge_id')
@@ -149,7 +189,6 @@ export default function TabDashboard({ companyId }: { companyId: string }) {
       const todayStart = new Date()
       todayStart.setHours(0, 0, 0, 0)
 
-      // ── Global stats ──────────────────────────────────────────────────────
       const userMessages = messages.filter(m => m.role === 'user')
       const globalContacts = new Set(userMessages.map(m => m.phone_number))
       const globalToday = userMessages.filter(m => new Date(m.created_at) >= todayStart)
@@ -161,7 +200,19 @@ export default function TabDashboard({ companyId }: { companyId: string }) {
         lastConversation: userMessages[0]?.created_at || null,
       })
 
-      // ── Gráfica: últimos 7 días ───────────────────────────────────────────
+      // Hora pico global
+      const hourCounts: Record<number, number> = {}
+      userMessages.forEach(m => {
+        const h = new Date(m.created_at).getHours()
+        hourCounts[h] = (hourCounts[h] || 0) + 1
+      })
+      if (Object.keys(hourCounts).length > 0) {
+        const [peakH, peakC] = Object.entries(hourCounts)
+          .sort((a, b) => Number(b[1]) - Number(a[1]))[0]
+        setGlobalPeak({ hour: Number(peakH), count: peakC as number })
+      }
+
+      // Últimos 7 días con hora pico por día
       const DAY_LABELS = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb']
       const bars: DayBar[] = []
 
@@ -172,32 +223,36 @@ export default function TabDashboard({ companyId }: { companyId: string }) {
         const nextD = new Date(d)
         nextD.setDate(nextD.getDate() + 1)
 
-        const count = userMessages.filter(m => {
+        const dayMsgs = userMessages.filter(m => {
           const t = new Date(m.created_at)
           return t >= d && t < nextD
-        }).length
+        })
+
+        let dayPeakHour: number | null = null
+        let dayPeakCount = 0
+        if (dayMsgs.length > 0) {
+          const dayHours: Record<number, number> = {}
+          dayMsgs.forEach(m => {
+            const h = new Date(m.created_at).getHours()
+            dayHours[h] = (dayHours[h] || 0) + 1
+          })
+          const [ph, pc] = Object.entries(dayHours)
+            .sort((a, b) => Number(b[1]) - Number(a[1]))[0]
+          dayPeakHour = Number(ph)
+          dayPeakCount = pc as number
+        }
 
         bars.push({
           label: i === 0 ? 'Hoy' : DAY_LABELS[d.getDay()],
           date: d.toISOString().split('T')[0],
-          count,
+          count: dayMsgs.length,
+          peakHour: dayPeakHour,
+          peakCount: dayPeakCount,
         })
       }
       setChartData(bars)
 
-      // ── Hora pico ─────────────────────────────────────────────────────────
-      const hourCounts: Record<number, number> = {}
-      userMessages.forEach(m => {
-        const h = new Date(m.created_at).getHours()
-        hourCounts[h] = (hourCounts[h] || 0) + 1
-      })
-      if (Object.keys(hourCounts).length > 0) {
-        const [peakH, peakCount] = Object.entries(hourCounts)
-          .sort((a, b) => Number(b[1]) - Number(a[1]))[0]
-        setPeakHour({ hour: Number(peakH), count: peakCount as number })
-      }
-
-      // ── Stats por campaña ─────────────────────────────────────────────────
+      // Stats por campaña
       const stats: CampaignStats[] = (campaigns || []).map(k => {
         const kMessages = messages.filter(m => m.knowledge_id === k.id && m.role === 'user')
         const kContacts = new Set(kMessages.map(m => m.phone_number))
@@ -222,12 +277,6 @@ export default function TabDashboard({ companyId }: { companyId: string }) {
       day: '2-digit', month: 'short',
       hour: '2-digit', minute: '2-digit',
     })
-  }
-
-  const formatPeakHour = (h: number) => {
-    const ampm = h >= 12 ? 'pm' : 'am'
-    const h12 = h % 12 === 0 ? 12 : h % 12
-    return `${h12}:00 ${ampm}`
   }
 
   if (loading) return <p className="text-sm text-muted-foreground">Cargando...</p>
@@ -275,7 +324,7 @@ export default function TabDashboard({ companyId }: { companyId: string }) {
         </div>
       </div>
 
-      {/* Gráfica + hora pico */}
+      {/* Gráfica */}
       <div>
         <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-3">
           Actividad últimos 7 días
@@ -284,13 +333,15 @@ export default function TabDashboard({ companyId }: { companyId: string }) {
           <div className="flex items-start justify-between mb-5">
             <div>
               <p className="text-sm font-medium">Mensajes por día</p>
-              <p className="text-xs text-muted-foreground mt-0.5">Solo mensajes entrantes</p>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                Pasa el cursor sobre cada barra para ver el detalle
+              </p>
             </div>
-            {peakHour && hasActivity && (
+            {globalPeak && hasActivity && (
               <div className="text-right bg-muted/50 rounded-xl px-3 py-2">
-                <p className="text-xs text-muted-foreground">Hora pico</p>
-                <p className="text-base font-bold tabular-nums">{formatPeakHour(peakHour.hour)}</p>
-                <p className="text-xs text-muted-foreground">{peakHour.count} msgs</p>
+                <p className="text-xs text-muted-foreground">Hora pico general</p>
+                <p className="text-base font-bold tabular-nums">{formatHour(globalPeak.hour)}</p>
+                <p className="text-xs text-muted-foreground">{globalPeak.count} msgs</p>
               </div>
             )}
           </div>
@@ -305,7 +356,7 @@ export default function TabDashboard({ companyId }: { companyId: string }) {
         </Card>
       </div>
 
-      {/* Estadísticas por campaña */}
+      {/* Por campaña */}
       <div>
         <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-3">Por campaña</p>
         {campaignStats.length === 0 ? (
@@ -320,16 +371,12 @@ export default function TabDashboard({ companyId }: { companyId: string }) {
                   <div className="flex items-center gap-2">
                     <p className="font-medium">{knowledge.name}</p>
                     {knowledge.active ? (
-                      <Badge className="bg-green-50 text-green-700 border-green-200 text-xs">
-                        ● Activa
-                      </Badge>
+                      <Badge className="bg-green-50 text-green-700 border-green-200 text-xs">● Activa</Badge>
                     ) : (
                       <Badge variant="secondary" className="text-xs">Inactiva</Badge>
                     )}
                   </div>
-                  <p className="text-xs text-muted-foreground">
-                    Última: {formatTime(lastConversation)}
-                  </p>
+                  <p className="text-xs text-muted-foreground">Última: {formatTime(lastConversation)}</p>
                 </div>
                 <div className="grid grid-cols-3 gap-3">
                   <div className="bg-muted/50 rounded-xl p-3 text-center">
