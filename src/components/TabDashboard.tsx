@@ -21,15 +21,109 @@ type GlobalStats = {
   lastConversation: string | null
 }
 
+type DayBar = {
+  label: string
+  date: string
+  count: number
+}
+
+type PeakHour = {
+  hour: number
+  count: number
+}
+
+// ─── Gráfica de barras SVG (sin dependencias externas) ────────────────────────
+function BarChart({ data }: { data: DayBar[] }) {
+  const maxCount = Math.max(...data.map(d => d.count), 1)
+  const chartH = 80
+  const barW = 28
+  const gap = 10
+  const totalW = data.length * (barW + gap) - gap
+
+  return (
+    <div className="w-full">
+      <svg
+        viewBox={`0 0 ${totalW} ${chartH + 28}`}
+        width="100%"
+        aria-label="Mensajes por día"
+      >
+        {data.map((d, i) => {
+          const barH = maxCount > 0 ? Math.max((d.count / maxCount) * chartH, d.count > 0 ? 4 : 0) : 0
+          const x = i * (barW + gap)
+          const y = chartH - barH
+          const isToday = i === data.length - 1
+
+          return (
+            <g key={d.date}>
+              {/* Barra de fondo (siempre visible) */}
+              <rect
+                x={x}
+                y={0}
+                width={barW}
+                height={chartH}
+                rx={4}
+                fill="currentColor"
+                className="text-muted/40"
+              />
+              {/* Barra de datos */}
+              {barH > 0 && (
+                <rect
+                  x={x}
+                  y={y}
+                  width={barW}
+                  height={barH}
+                  rx={4}
+                  fill="currentColor"
+                  className={isToday ? 'text-foreground' : 'text-muted-foreground/50'}
+                />
+              )}
+              {/* Valor encima */}
+              {d.count > 0 && (
+                <text
+                  x={x + barW / 2}
+                  y={y - 4}
+                  textAnchor="middle"
+                  fontSize={9}
+                  fill="currentColor"
+                  className="text-muted-foreground"
+                >
+                  {d.count}
+                </text>
+              )}
+              {/* Etiqueta día */}
+              <text
+                x={x + barW / 2}
+                y={chartH + 16}
+                textAnchor="middle"
+                fontSize={10}
+                fontWeight={isToday ? '600' : '400'}
+                fill="currentColor"
+                className={isToday ? 'text-foreground' : 'text-muted-foreground'}
+              >
+                {d.label}
+              </text>
+            </g>
+          )
+        })}
+      </svg>
+    </div>
+  )
+}
+
+// ─── Componente principal ─────────────────────────────────────────────────────
 export default function TabDashboard({ companyId }: { companyId: string }) {
   const [campaignStats, setCampaignStats] = useState<CampaignStats[]>([])
-  const [globalStats, setGlobalStats] = useState<GlobalStats>({ todayMessages: 0, totalMessages: 0, totalContacts: 0, lastConversation: null })
+  const [globalStats, setGlobalStats] = useState<GlobalStats>({
+    todayMessages: 0, totalMessages: 0, totalContacts: 0, lastConversation: null,
+  })
   const [session, setSession] = useState<Partial<WhatsappSession>>({ status: 'disconnected' })
+  const [chartData, setChartData] = useState<DayBar[]>([])
+  const [peakHour, setPeakHour] = useState<PeakHour | null>(null)
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
     const load = async () => {
-      // Load WhatsApp session
+      // WhatsApp session
       const { data: sessionData } = await supabase
         .from('whatsapp_sessions')
         .select('*')
@@ -37,14 +131,14 @@ export default function TabDashboard({ companyId }: { companyId: string }) {
         .single()
       if (sessionData) setSession(sessionData)
 
-      // Load all campaigns
+      // Campaigns
       const { data: campaigns } = await supabase
         .from('bot_knowledge')
         .select('*')
         .eq('company_id', companyId)
         .order('created_at', { ascending: true })
 
-      // Load all chat history
+      // Todos los mensajes
       const { data: allMessages } = await supabase
         .from('chat_history')
         .select('phone_number, role, created_at, knowledge_id')
@@ -55,10 +149,11 @@ export default function TabDashboard({ companyId }: { companyId: string }) {
       const todayStart = new Date()
       todayStart.setHours(0, 0, 0, 0)
 
-      // Global stats
+      // ── Global stats ──────────────────────────────────────────────────────
       const userMessages = messages.filter(m => m.role === 'user')
       const globalContacts = new Set(userMessages.map(m => m.phone_number))
       const globalToday = userMessages.filter(m => new Date(m.created_at) >= todayStart)
+
       setGlobalStats({
         todayMessages: globalToday.length,
         totalMessages: userMessages.length,
@@ -66,7 +161,43 @@ export default function TabDashboard({ companyId }: { companyId: string }) {
         lastConversation: userMessages[0]?.created_at || null,
       })
 
-      // Per-campaign stats
+      // ── Gráfica: últimos 7 días ───────────────────────────────────────────
+      const DAY_LABELS = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb']
+      const bars: DayBar[] = []
+
+      for (let i = 6; i >= 0; i--) {
+        const d = new Date()
+        d.setDate(d.getDate() - i)
+        d.setHours(0, 0, 0, 0)
+        const nextD = new Date(d)
+        nextD.setDate(nextD.getDate() + 1)
+
+        const count = userMessages.filter(m => {
+          const t = new Date(m.created_at)
+          return t >= d && t < nextD
+        }).length
+
+        bars.push({
+          label: i === 0 ? 'Hoy' : DAY_LABELS[d.getDay()],
+          date: d.toISOString().split('T')[0],
+          count,
+        })
+      }
+      setChartData(bars)
+
+      // ── Hora pico ─────────────────────────────────────────────────────────
+      const hourCounts: Record<number, number> = {}
+      userMessages.forEach(m => {
+        const h = new Date(m.created_at).getHours()
+        hourCounts[h] = (hourCounts[h] || 0) + 1
+      })
+      if (Object.keys(hourCounts).length > 0) {
+        const [peakH, peakCount] = Object.entries(hourCounts)
+          .sort((a, b) => Number(b[1]) - Number(a[1]))[0]
+        setPeakHour({ hour: Number(peakH), count: peakCount as number })
+      }
+
+      // ── Stats por campaña ─────────────────────────────────────────────────
       const stats: CampaignStats[] = (campaigns || []).map(k => {
         const kMessages = messages.filter(m => m.knowledge_id === k.id && m.role === 'user')
         const kContacts = new Set(kMessages.map(m => m.phone_number))
@@ -93,9 +224,16 @@ export default function TabDashboard({ companyId }: { companyId: string }) {
     })
   }
 
+  const formatPeakHour = (h: number) => {
+    const ampm = h >= 12 ? 'pm' : 'am'
+    const h12 = h % 12 === 0 ? 12 : h % 12
+    return `${h12}:00 ${ampm}`
+  }
+
   if (loading) return <p className="text-sm text-muted-foreground">Cargando...</p>
 
   const isConnected = session.status === 'connected'
+  const hasActivity = chartData.some(d => d.count > 0)
 
   return (
     <div className="space-y-8">
@@ -135,6 +273,36 @@ export default function TabDashboard({ companyId }: { companyId: string }) {
             <p className="text-xs text-muted-foreground">Última conversación</p>
           </Card>
         </div>
+      </div>
+
+      {/* Gráfica + hora pico */}
+      <div>
+        <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-3">
+          Actividad últimos 7 días
+        </p>
+        <Card className="p-5">
+          <div className="flex items-start justify-between mb-5">
+            <div>
+              <p className="text-sm font-medium">Mensajes por día</p>
+              <p className="text-xs text-muted-foreground mt-0.5">Solo mensajes entrantes</p>
+            </div>
+            {peakHour && hasActivity && (
+              <div className="text-right bg-muted/50 rounded-xl px-3 py-2">
+                <p className="text-xs text-muted-foreground">Hora pico</p>
+                <p className="text-base font-bold tabular-nums">{formatPeakHour(peakHour.hour)}</p>
+                <p className="text-xs text-muted-foreground">{peakHour.count} msgs</p>
+              </div>
+            )}
+          </div>
+
+          {hasActivity ? (
+            <BarChart data={chartData} />
+          ) : (
+            <div className="py-8 text-center">
+              <p className="text-sm text-muted-foreground">Sin mensajes en los últimos 7 días</p>
+            </div>
+          )}
+        </Card>
       </div>
 
       {/* Estadísticas por campaña */}
