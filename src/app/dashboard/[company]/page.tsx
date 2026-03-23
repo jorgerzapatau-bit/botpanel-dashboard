@@ -23,6 +23,9 @@ export default function DashboardPage() {
 
   const [company, setCompany] = useState<Company | null>(null)
   const [loading, setLoading] = useState(true)
+  const [activeTab, setActiveTab] = useState('dashboard')
+  // Date filter passed from Dashboard bar click → History tab
+  const [historyDateFilter, setHistoryDateFilter] = useState<string | null>(null)
 
   useEffect(() => {
     const init = async () => {
@@ -54,6 +57,12 @@ export default function DashboardPage() {
     router.push(`/?company=${slug}`)
   }
 
+  // Called when a bar in Dashboard is clicked
+  const handleDayClick = (date: string) => {
+    setHistoryDateFilter(date)
+    setActiveTab('history')
+  }
+
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
@@ -79,7 +88,7 @@ export default function DashboardPage() {
 
       {/* Tabs */}
       <main className="max-w-4xl mx-auto px-4 py-8">
-        <Tabs defaultValue="dashboard">
+        <Tabs value={activeTab} onValueChange={setActiveTab}>
           <TabsList className="w-full mb-6">
             <TabsTrigger value="dashboard" className="flex-1">Dashboard</TabsTrigger>
             <TabsTrigger value="prompt" className="flex-1">Asistente IA</TabsTrigger>
@@ -89,7 +98,7 @@ export default function DashboardPage() {
           </TabsList>
 
           <TabsContent value="dashboard">
-            <TabDashboard companyId={company!.id} />
+            <TabDashboard companyId={company!.id} onDayClick={handleDayClick} />
           </TabsContent>
 
           <TabsContent value="prompt">
@@ -101,7 +110,11 @@ export default function DashboardPage() {
           </TabsContent>
 
           <TabsContent value="history">
-            <TabHistory companyId={company!.id} />
+            <TabHistory
+              companyId={company!.id}
+              initialDateFilter={historyDateFilter}
+              onDateFilterConsumed={() => setHistoryDateFilter(null)}
+            />
           </TabsContent>
 
           <TabsContent value="whatsapp">

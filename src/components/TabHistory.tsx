@@ -17,7 +17,51 @@ type Contact = {
   count: number
 }
 
-export default function TabHistory({ companyId }: { companyId: string }) {
+// ─── Selector de rango de fechas ──────────────────────────────────────────────
+type DateRange = 'all' | 'today' | 'yesterday' | string // string = 'YYYY-MM-DD' specific day
+
+function buildDateRange(range: DateRange): { from: Date | null; to: Date | null; label: string } {
+  const now = new Date()
+  if (range === 'all') return { from: null, to: null, label: 'Todos' }
+  if (range === 'today') {
+    const from = new Date(now); from.setHours(0, 0, 0, 0)
+    const to = new Date(now); to.setHours(23, 59, 59, 999)
+    return { from, to, label: 'Hoy' }
+  }
+  if (range === 'yesterday') {
+    const from = new Date(now); from.setDate(from.getDate() - 1); from.setHours(0, 0, 0, 0)
+    const to = new Date(from); to.setHours(23, 59, 59, 999)
+    return { from, to, label: 'Ayer' }
+  }
+  // Specific date YYYY-MM-DD (from Dashboard click)
+  const from = new Date(range + 'T00:00:00')
+  const to = new Date(range + 'T23:59:59')
+  const label = from.toLocaleDateString('es-MX', { day: '2-digit', month: 'short' })
+  return { from, to, label }
+}
+
+// Recent 7 days for quick filter buttons
+function getLast7Days(): { date: string; label: string }[] {
+  const days = []
+  for (let i = 0; i <= 6; i++) {
+    const d = new Date()
+    d.setDate(d.getDate() - i)
+    const iso = d.toISOString().split('T')[0]
+    const label = i === 0 ? 'Hoy' : i === 1 ? 'Ayer' : d.toLocaleDateString('es-MX', { weekday: 'short', day: '2-digit' })
+    days.push({ date: iso, label })
+  }
+  return days
+}
+
+export default function TabHistory({
+  companyId,
+  initialDateFilter,
+  onDateFilterConsumed,
+}: {
+  companyId: string
+  initialDateFilter?: string | null
+  onDateFilterConsumed?: () => void
+}) {
   const [knowledgeList, setKnowledgeList] = useState<BotKnowledge[]>([])
   const [selectedKnowledge, setSelectedKnowledge] = useState<string | 'all'>('all')
   const [contacts, setContacts] = useState<Contact[]>([])
@@ -25,6 +69,17 @@ export default function TabHistory({ companyId }: { companyId: string }) {
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [loading, setLoading] = useState(true)
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null)
+  const [dateRange, setDateRange] = useState<DateRange>('all')
+  const [showDayPicker, setShowDayPicker] = useState(false)
+  const recentDays = getLast7Days()
+
+  // Consume external date filter from Dashboard click
+  useEffect(() => {
+    if (initialDateFilter) {
+      setDateRange(initialDateFilter)
+      onDateFilterConsumed?.()
+    }
+  }, [initialDateFilter])
 
   useEffect(() => {
     const init = async () => {
@@ -37,19 +92,25 @@ export default function TabHistory({ companyId }: { companyId: string }) {
       if (kList) {
         setKnowledgeList(kList)
         const active = kList.find(k => k.active)
-        if (active) {
-          setSelectedKnowledge(active.id)
-          await fetchContacts(active.id)
-        } else {
-          await fetchContacts(null)
-        }
+        const knowledgeId = active ? active.id : null
+        if (active) setSelectedKnowledge(active.id)
+        await fetchContacts(knowledgeId, dateRange)
+      } else {
+        await fetchContacts(null, dateRange)
       }
       setLoading(false)
     }
     init()
   }, [companyId])
 
-  const fetchContacts = async (knowledgeId: string | null) => {
+  // Re-fetch when date range changes
+  useEffect(() => {
+    if (!loading) {
+      fetchContacts(selectedKnowledge === 'all' ? null : selectedKnowledge, dateRange)
+    }
+  }, [dateRange])
+
+  const fetchContacts = async (knowledgeId: string | null, range: DateRange) => {
     let query = supabase
       .from('chat_history')
       .select('phone_number, contact_name, message, created_at, role')
@@ -59,6 +120,11 @@ export default function TabHistory({ companyId }: { companyId: string }) {
     if (knowledgeId && knowledgeId !== 'all') {
       query = query.eq('knowledge_id', knowledgeId)
     }
+
+    // Apply date filter
+    const { from, to } = buildDateRange(range)
+    if (from) query = query.gte('created_at', from.toISOString())
+    if (to) query = query.lte('created_at', to.toISOString())
 
     const { data } = await query
 
@@ -89,7 +155,12 @@ export default function TabHistory({ companyId }: { companyId: string }) {
 
   const handleFilterChange = async (knowledgeId: string) => {
     setSelectedKnowledge(knowledgeId)
-    await fetchContacts(knowledgeId === 'all' ? null : knowledgeId)
+    await fetchContacts(knowledgeId === 'all' ? null : knowledgeId, dateRange)
+  }
+
+  const handleDateChange = (range: DateRange) => {
+    setDateRange(range)
+    setShowDayPicker(false)
   }
 
   const loadMessages = async (phone: string) => {
@@ -104,6 +175,11 @@ export default function TabHistory({ companyId }: { companyId: string }) {
     if (selectedKnowledge !== 'all') {
       query = query.eq('knowledge_id', selectedKnowledge)
     }
+
+    // Apply date filter to messages too
+    const { from, to } = buildDateRange(dateRange)
+    if (from) query = query.gte('created_at', from.toISOString())
+    if (to) query = query.lte('created_at', to.toISOString())
 
     const { data } = await query
     if (data) setMessages(data)
@@ -127,7 +203,7 @@ export default function TabHistory({ companyId }: { companyId: string }) {
       setSelected(null)
       setMessages([])
     }
-    await fetchContacts(selectedKnowledge === 'all' ? null : selectedKnowledge)
+    await fetchContacts(selectedKnowledge === 'all' ? null : selectedKnowledge, dateRange)
   }
 
   const formatTime = (iso: string) => {
@@ -141,6 +217,8 @@ export default function TabHistory({ companyId }: { companyId: string }) {
     return contact.contact_name || `+${contact.phone_number}`
   }
 
+  const activeDateLabel = buildDateRange(dateRange).label
+
   if (loading) return <p className="text-sm text-muted-foreground">Cargando...</p>
 
   return (
@@ -150,9 +228,13 @@ export default function TabHistory({ companyId }: { companyId: string }) {
         <h2 className="text-lg font-medium">Historial de conversaciones</h2>
         <p className="text-sm text-muted-foreground">
           {contacts.length} contacto{contacts.length !== 1 ? 's' : ''} encontrados
+          {dateRange !== 'all' && (
+            <span className="ml-1">· <span className="font-medium text-foreground">{activeDateLabel}</span></span>
+          )}
         </p>
       </div>
 
+      {/* ─── Filtro por campaña ─────────────────────────────────────────── */}
       {knowledgeList.length > 0 && (
         <div className="flex gap-2 flex-wrap">
           <button
@@ -183,6 +265,84 @@ export default function TabHistory({ companyId }: { companyId: string }) {
           ))}
         </div>
       )}
+
+      {/* ─── Filtro por fecha ───────────────────────────────────────────── */}
+      <div className="flex gap-2 flex-wrap items-center">
+        <span className="text-xs text-muted-foreground font-medium uppercase tracking-wide">Período:</span>
+        <button
+          onClick={() => handleDateChange('all')}
+          className={`px-3 py-1.5 rounded-full text-sm border transition-all ${
+            dateRange === 'all'
+              ? 'bg-foreground text-background border-foreground'
+              : 'border-border hover:border-foreground/30'
+          }`}
+        >
+          Todos
+        </button>
+        <button
+          onClick={() => handleDateChange('today')}
+          className={`px-3 py-1.5 rounded-full text-sm border transition-all ${
+            dateRange === 'today'
+              ? 'bg-foreground text-background border-foreground'
+              : 'border-border hover:border-foreground/30'
+          }`}
+        >
+          Hoy
+        </button>
+        <button
+          onClick={() => handleDateChange('yesterday')}
+          className={`px-3 py-1.5 rounded-full text-sm border transition-all ${
+            dateRange === 'yesterday'
+              ? 'bg-foreground text-background border-foreground'
+              : 'border-border hover:border-foreground/30'
+          }`}
+        >
+          Ayer
+        </button>
+
+        {/* Picker de días recientes */}
+        <div className="relative">
+          <button
+            onClick={() => setShowDayPicker(v => !v)}
+            className={`px-3 py-1.5 rounded-full text-sm border transition-all flex items-center gap-1 ${
+              !['all', 'today', 'yesterday'].includes(dateRange)
+                ? 'bg-foreground text-background border-foreground'
+                : 'border-border hover:border-foreground/30'
+            }`}
+          >
+            {!['all', 'today', 'yesterday'].includes(dateRange)
+              ? activeDateLabel
+              : 'Elegir día'}
+            <span className="text-xs opacity-60">▾</span>
+          </button>
+
+          {showDayPicker && (
+            <div className="absolute top-full mt-1 left-0 z-50 bg-popover border border-border rounded-xl shadow-lg p-1.5 flex flex-col gap-0.5 min-w-[130px]">
+              {recentDays.slice(2).map(day => (
+                <button
+                  key={day.date}
+                  onClick={() => handleDateChange(day.date)}
+                  className={`text-left px-3 py-1.5 rounded-lg text-sm hover:bg-muted transition-colors ${
+                    dateRange === day.date ? 'bg-muted font-medium' : ''
+                  }`}
+                >
+                  {day.label}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Limpiar filtro de fecha si viene del Dashboard */}
+        {!['all', 'today', 'yesterday'].includes(dateRange) && (
+          <button
+            onClick={() => handleDateChange('all')}
+            className="text-xs text-muted-foreground hover:text-foreground transition-colors underline underline-offset-2"
+          >
+            Limpiar
+          </button>
+        )}
+      </div>
 
       {contacts.length === 0 && (
         <Card className="p-8 text-center">
@@ -276,6 +436,11 @@ export default function TabHistory({ companyId }: { companyId: string }) {
                 </p>
                 {contacts.find(c => c.phone_number === selected)?.contact_name && (
                   <p className="text-xs text-muted-foreground">+{selected}</p>
+                )}
+                {dateRange !== 'all' && (
+                  <Badge variant="secondary" className="text-xs ml-auto">
+                    {activeDateLabel}
+                  </Badge>
                 )}
               </div>
               <Card className="p-4 space-y-3 max-h-[500px] overflow-y-auto">

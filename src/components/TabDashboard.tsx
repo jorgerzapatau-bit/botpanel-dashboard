@@ -40,8 +40,8 @@ function formatHour(h: number) {
   return `${h12}:00 ${ampm}`
 }
 
-// ─── Gráfica 100% HTML — sin SVG, hover nativo ────────────────────────────────
-function BarChart({ data }: { data: DayBar[] }) {
+// ─── Gráfica con click para ir al historial ───────────────────────────────────
+function BarChart({ data, onDayClick }: { data: DayBar[], onDayClick?: (date: string) => void }) {
   const [hovered, setHovered] = useState<number | null>(null)
   const maxCount = Math.max(...data.map(d => d.count), 1)
   const CHART_HEIGHT = 120 // px
@@ -54,14 +54,16 @@ function BarChart({ data }: { data: DayBar[] }) {
           const isToday = i === data.length - 1
           const pct = d.count > 0 ? Math.max((d.count / maxCount) * 100, 5) : 0
           const isHov = hovered === i
+          const isClickable = d.count > 0 && !!onDayClick
 
           return (
             <div
               key={d.date}
               className="relative flex-1 flex flex-col justify-end"
-              style={{ height: '100%' }}
+              style={{ height: '100%', cursor: isClickable ? 'pointer' : 'default' }}
               onMouseEnter={() => setHovered(i)}
               onMouseLeave={() => setHovered(null)}
+              onClick={() => isClickable && onDayClick?.(d.date)}
             >
               {/* Tooltip */}
               {isHov && (
@@ -82,6 +84,11 @@ function BarChart({ data }: { data: DayBar[] }) {
                           Hora pico{' '}
                           <span className="font-semibold text-foreground">{formatHour(d.peakHour)}</span>
                           <span className="ml-1 opacity-60">({d.peakCount})</span>
+                        </p>
+                      )}
+                      {onDayClick && (
+                        <p className="text-xs text-primary mt-1 pt-1 border-t border-border font-medium">
+                          Clic para ver historial →
                         </p>
                       )}
                     </>
@@ -141,7 +148,13 @@ function BarChart({ data }: { data: DayBar[] }) {
 }
 
 // ─── Componente principal ─────────────────────────────────────────────────────
-export default function TabDashboard({ companyId }: { companyId: string }) {
+export default function TabDashboard({
+  companyId,
+  onDayClick,
+}: {
+  companyId: string
+  onDayClick?: (date: string) => void
+}) {
   const [campaignStats, setCampaignStats] = useState<CampaignStats[]>([])
   const [globalStats, setGlobalStats] = useState<GlobalStats>({
     todayMessages: 0, totalMessages: 0, totalContacts: 0, lastConversation: null,
@@ -321,7 +334,9 @@ export default function TabDashboard({ companyId }: { companyId: string }) {
             <div>
               <p className="text-sm font-medium">Mensajes por día</p>
               <p className="text-xs text-muted-foreground mt-0.5">
-                Pasa el cursor sobre cada barra para ver el detalle
+                {onDayClick
+                  ? 'Pasa el cursor para ver el detalle · Haz clic para ver el historial del día'
+                  : 'Pasa el cursor sobre cada barra para ver el detalle'}
               </p>
             </div>
             {globalPeak && hasActivity && (
@@ -334,7 +349,7 @@ export default function TabDashboard({ companyId }: { companyId: string }) {
           </div>
 
           {hasActivity ? (
-            <BarChart data={chartData} />
+            <BarChart data={chartData} onDayClick={onDayClick} />
           ) : (
             <div className="py-8 text-center">
               <p className="text-sm text-muted-foreground">Sin mensajes en los últimos 7 días</p>
