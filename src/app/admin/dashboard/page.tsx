@@ -164,7 +164,7 @@ export default function AdminDashboardPage() {
   const openEdit = (c: CompanyWithSubs) => {
     setEditingId(c.id)
     setForm({
-      name: c.name, slug: c.slug, email: c.email || '',
+      name: c.name, slug: c.slug, email: c.email || '', password: '',
       plan: c.plan as 'free' | 'pro', active: c.active, notes: c.notes || '',
       start_date: todayISO(), end_date: plusOneMonth(todayISO()),
       monthly_cost: '', sub_notes: '',
