@@ -65,8 +65,18 @@ function statusBadge(s: string) {
   return                      { label: '✕ Vencido',   cls: 'bg-red-50 text-red-600 border-red-200' }
 }
 
+const SITE_URL = 'https://botpanel-dashboard.vercel.app'
+
+function buildLoginUrl(slug: string) {
+  return `${SITE_URL}/?company=${slug}`
+}
+
+async function copyToClipboard(text: string) {
+  try { await navigator.clipboard.writeText(text) } catch { /* silent */ }
+}
+
 const makeEmptyForm = () => ({
-  name: '', slug: '', email: '', plan: 'free' as 'free' | 'pro',
+  name: '', slug: '', email: '', password: '', plan: 'free' as 'free' | 'pro',
   active: true, notes: '',
   start_date: todayISO(), end_date: plusOneMonth(todayISO()),
   monthly_cost: '', sub_notes: '',
@@ -87,6 +97,7 @@ export default function AdminDashboardPage() {
   const [expandedTab, setExpandedTab] = useState<'dashboard' | 'subscriptions'>('dashboard')
   const [showRenew, setShowRenew] = useState<CompanyWithSubs | null>(null)
   const [renewForm, setRenewForm] = useState({ start_date: '', end_date: '', monthly_cost: '', notes: '' })
+  const [createdCredentials, setCreatedCredentials] = useState<{ email: string; password: string; url: string } | null>(null)
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
@@ -164,7 +175,27 @@ export default function AdminDashboardPage() {
   const handleSave = async () => {
     if (!form.name.trim() || !form.slug.trim()) { toast.error('Nombre y slug son obligatorios'); return }
     if (!/^[a-z0-9-]+$/.test(form.slug)) { toast.error('El slug solo puede tener letras minúsculas, números y guiones'); return }
+    if (!editingId && !form.email.trim()) { toast.error('El email del cliente es obligatorio'); return }
+    if (!editingId && form.password.length < 6) { toast.error('La contraseña debe tener al menos 6 caracteres'); return }
     setSaving(true)
+
+    // Step 1: create Supabase Auth user (only on create)
+    if (!editingId) {
+      const { data: { session } } = await supabase.auth.getSession()
+      const token = session?.access_token
+      const fnUrl = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/create-company-user`
+      const res = await fetch(fnUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({ email: form.email.trim(), password: form.password }),
+      })
+      const result = await res.json()
+      if (!res.ok) {
+        toast.error('Error creando usuario: ' + (result.error || 'Error desconocido'))
+        setSaving(false)
+        return
+      }
+    }
 
     const payload = {
       name: form.name.trim(), slug: form.slug.trim().toLowerCase(),
@@ -180,7 +211,6 @@ export default function AdminDashboardPage() {
       const { data, error } = await supabase.from('companies').insert(payload).select().single()
       if (error) { toast.error('Error: ' + error.message); setSaving(false); return }
       companyId = data.id
-      // Create initial subscription
       if (form.start_date && form.end_date) {
         await supabase.from('company_subscriptions').insert({
           company_id: companyId,
@@ -192,9 +222,15 @@ export default function AdminDashboardPage() {
           notes: form.sub_notes || null,
         })
       }
+      // Show credentials modal
+      setCreatedCredentials({
+        email: form.email.trim(),
+        password: form.password,
+        url: buildLoginUrl(form.slug.trim().toLowerCase()),
+      })
     }
 
-    toast.success(editingId ? 'Empresa actualizada' : 'Empresa creada')
+    if (editingId) toast.success('Empresa actualizada')
     setShowForm(false); setSaving(false)
     await fetchCompanies()
   }
@@ -367,10 +403,19 @@ export default function AdminDashboardPage() {
                         )}
                       </div>
 
-                      {/* Row 2: meta */}
-                      <div className="flex gap-4 text-xs text-muted-foreground flex-wrap">
+                      {/* Row 2: meta + copy URL */}
+                      <div className="flex gap-4 text-xs text-muted-foreground flex-wrap items-center">
                         <span>Slug: <span className="font-mono text-foreground">{c.slug}</span></span>
-                        <span>URL: <span className="font-mono text-foreground">/dashboard/{c.slug}</span></span>
+                        <span className="flex items-center gap-1.5">
+                          <span className="font-mono text-foreground truncate max-w-[220px]">{buildLoginUrl(c.slug)}</span>
+                          <button
+                            onClick={async () => { await copyToClipboard(buildLoginUrl(c.slug)); toast.success('URL copiada') }}
+                            className="shrink-0 px-1.5 py-0.5 rounded border border-border hover:bg-muted transition-colors text-xs"
+                            title="Copiar URL"
+                          >
+                            📋 Copiar
+                          </button>
+                        </span>
                         {c.email && <span>{c.email}</span>}
                         <span>Creada: {formatDateTime(c.created_at)}</span>
                       </div>
@@ -531,10 +576,36 @@ export default function AdminDashboardPage() {
                     </div>
                   </div>
                   <div className="space-y-1.5">
-                    <Label>Email de contacto</Label>
+                    <Label>Email del cliente {!editingId && <span className="text-red-500">*</span>}</Label>
                     <Input type="email" placeholder="cliente@empresa.com" value={form.email}
                       onChange={e => setForm(f => ({ ...f, email: e.target.value }))} />
                   </div>
+                  {/* Password — only on create */}
+                  {!editingId && (
+                    <div className="space-y-1.5">
+                      <Label>Contraseña <span className="text-red-500">*</span> <span className="text-xs text-muted-foreground font-normal">(mín. 6 caracteres)</span></Label>
+                      <Input type="text" placeholder="Contraseña para el cliente" value={form.password}
+                        onChange={e => setForm(f => ({ ...f, password: e.target.value }))} />
+                    </div>
+                  )}
+                  {/* URL preview */}
+                  {form.slug && (
+                    <div className="space-y-1.5">
+                      <Label>URL de acceso del cliente</Label>
+                      <div className="flex items-center gap-2">
+                        <div className="flex-1 px-3 py-2 rounded-lg bg-muted/50 border border-border font-mono text-xs text-foreground truncate">
+                          {buildLoginUrl(form.slug)}
+                        </div>
+                        <button
+                          type="button"
+                          onClick={async () => { await copyToClipboard(buildLoginUrl(form.slug)); toast.success('URL copiada') }}
+                          className="shrink-0 px-3 py-2 rounded-lg border border-border hover:bg-muted text-xs transition-colors"
+                        >
+                          📋 Copiar
+                        </button>
+                      </div>
+                    </div>
+                  )}
                   {/* Internal notes */}
                   <div className="space-y-1.5">
                     <Label>Notas internas <span className="text-xs text-muted-foreground font-normal">(solo visible para ti)</span></Label>
