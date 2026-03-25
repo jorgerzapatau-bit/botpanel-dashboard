@@ -134,6 +134,17 @@ function getNextStepPlaceholder(objective: string): string {
 
 // ─── Generadores de prompt y knowledge ────────────────────────────────────────
 
+function generateMenuText(w: WizardData): string {
+  const lines = w.catalogItems
+    .filter(i => i.title.trim())
+    .map((item, idx) => {
+      const price = formatPrice(item)
+      return `${idx + 1}️⃣ ${item.title}${price ? ` — ${price}` : ''}`
+    })
+    .join('\n')
+  return `¡Hola! 👋 ¿En qué te puedo ayudar?\n\n${lines}\n\nResponde con el número de tu elección.`
+}
+
 function generatePersonalityPrompt(w: WizardData): string {
   const toneMap: Record<string, string> = {
     formal:   'profesional, respetuoso y directo',
@@ -646,15 +657,7 @@ export default function TabPrompt({ companyId }: { companyId: string }) {
               <div className="rounded-xl bg-[#0b1f0e] p-4 space-y-2">
                 <p className="text-xs text-green-400 font-medium">Vista previa — menú en WhatsApp</p>
                 <p className="text-sm text-green-100 whitespace-pre-line font-mono leading-relaxed">
-                  {`¡Hola! 👋 ¿En qué te puedo ayudar?\n\n`}
-                  {wizard.catalogItems
-                    .filter(i => i.title.trim())
-                    .map((item, idx) => {
-                      const price = formatPrice(item)
-                      return `${idx + 1}️⃣ ${item.title}${price ? ` — ${price}` : ''}`
-                    })
-                    .join('\n')}
-                  {`\n\nResponde con el número de tu elección.`}
+                  {generateMenuText(wizard)}
                 </p>
               </div>
             )}
@@ -664,7 +667,15 @@ export default function TabPrompt({ companyId }: { companyId: string }) {
               <Button
                 className="flex-1"
                 disabled={!wizard.catalogItems.some(i => i.title.trim())}
-                onClick={() => setWizardStep(4)}
+                onClick={() => {
+                  // Pre-llena el mensaje de bienvenida con el menú generado,
+                  // solo si el usuario no lo ha editado manualmente antes
+                  setWizard(w => ({
+                    ...w,
+                    welcomeMessage: w.welcomeMessage.trim() ? w.welcomeMessage : generateMenuText(w),
+                  }))
+                  setWizardStep(4)
+                }}
               >
                 Continuar →
               </Button>
@@ -680,23 +691,34 @@ export default function TabPrompt({ companyId }: { companyId: string }) {
               <p className="text-sm text-muted-foreground mt-1">Define el nombre y el estilo de comunicación.</p>
             </div>
             <Card className="p-5 space-y-4">
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-1.5">
-                  <Label>Nombre del bot *</Label>
-                  <Input
-                    placeholder="Ej. Claudia, Max, Asistente..."
-                    value={wizard.botName}
-                    onChange={e => setWizard(w => ({ ...w, botName: e.target.value }))}
-                  />
-                </div>
-                <div className="space-y-1.5">
+              <div className="space-y-1.5">
+                <Label>Nombre del bot *</Label>
+                <Input
+                  placeholder="Ej. Claudia, Max, Asistente..."
+                  value={wizard.botName}
+                  onChange={e => setWizard(w => ({ ...w, botName: e.target.value }))}
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between">
                   <Label>Mensaje de bienvenida</Label>
-                  <Input
-                    placeholder="Ej. ¡Hola! Soy Claudia 👋 ¿En qué te ayudo?"
-                    value={wizard.welcomeMessage}
-                    onChange={e => setWizard(w => ({ ...w, welcomeMessage: e.target.value }))}
-                  />
+                  <button
+                    type="button"
+                    onClick={() => setWizard(w => ({ ...w, welcomeMessage: generateMenuText(w) }))}
+                    className="text-xs text-muted-foreground hover:text-foreground transition-colors"
+                  >
+                    ↺ Restaurar menú generado
+                  </button>
                 </div>
+                <Textarea
+                  className="min-h-[120px] font-mono text-xs leading-relaxed"
+                  value={wizard.welcomeMessage}
+                  onChange={e => setWizard(w => ({ ...w, welcomeMessage: e.target.value }))}
+                />
+                <p className="text-xs text-muted-foreground">
+                  Este es el primer mensaje que recibirá el cliente. Puedes editarlo libremente.
+                </p>
               </div>
 
               <div className="space-y-2">
