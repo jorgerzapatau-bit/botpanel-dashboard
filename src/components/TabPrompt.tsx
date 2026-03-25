@@ -42,10 +42,14 @@ const CREATIVITY_OPTIONS = [
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
 
+type PriceType = 'fixed' | 'from' | 'quote'
+
 type CatalogItem = {
   id: string
-  offer: string        // qué ofreces / nombre del servicio
-  price: string        // precio (texto libre)
+  title: string        // nombre corto que aparece en el menú
+  benefit: string      // descripción breve del beneficio
+  priceType: PriceType // fixed | from | quote
+  priceValue: string   // monto (solo para fixed y from)
   nextStep: string     // siguiente paso del cliente
 }
 
@@ -68,10 +72,28 @@ type WizardData = {
 
 const newCatalogItem = (): CatalogItem => ({
   id: Math.random().toString(36).slice(2),
-  offer: '',
-  price: '',
+  title: '',
+  benefit: '',
+  priceType: 'fixed',
+  priceValue: '',
   nextStep: '',
 })
+
+// Formatea el precio para mostrarlo en el menú y en el knowledge doc
+function formatPrice(item: CatalogItem): string {
+  if (item.priceType === 'quote') return 'Precio a cotizar'
+  if (item.priceType === 'from')  return item.priceValue ? `Desde ${item.priceValue}` : 'Desde [monto]'
+  return item.priceValue || ''
+}
+
+// Instrucción al bot sobre cómo manejar el precio según tipo
+function priceInstruction(item: CatalogItem): string {
+  if (item.priceType === 'quote')
+    return 'El precio de esta opción requiere cotización personalizada. Cuando el cliente pregunte por el precio, responde: "El precio varía según tus necesidades específicas. ¿Te conecto con un asesor para darte un presupuesto a medida?"'
+  if (item.priceType === 'from')
+    return `El precio parte desde ${item.priceValue || '[monto base]'}. Puedes mencionarlo así y ofrecer contacto con asesor para detalles.`
+  return item.priceValue ? `Precio fijo: ${item.priceValue}` : 'Precio no especificado — no inventar ni estimar.'
+}
 
 const emptyWizard = (): WizardData => ({
   objective: '',
@@ -81,25 +103,23 @@ const emptyWizard = (): WizardData => ({
   style: 'medio', creativity: 'balanceado',
 })
 
-// ─── Helpers para placeholders según objetivo ──────────────────────────────────
-
-function getOfferPlaceholder(objective: string): string {
+function getTitlePlaceholder(objective: string): string {
   switch (objective) {
-    case 'appoint': return 'Ej. Consulta nutricional 1hr'
+    case 'appoint': return 'Ej. Consulta nutricional'
     case 'course':  return 'Ej. Curso de meditación'
-    case 'support': return 'Ej. Soporte técnico básico'
+    case 'support': return 'Ej. Soporte técnico'
     case 'faq':     return 'Ej. Información general'
     default:        return 'Ej. Plan mensual premium'
   }
 }
 
-function getPricePlaceholder(objective: string): string {
+function getBenefitPlaceholder(objective: string): string {
   switch (objective) {
-    case 'appoint': return 'Ej. $350 / Gratis'
-    case 'course':  return 'Ej. $499 / $299 al mes'
-    case 'support': return 'Ej. Incluido / $200'
-    case 'faq':     return 'Ej. Sin costo'
-    default:        return 'Ej. $1,200'
+    case 'appoint': return 'Ej. Evaluación personalizada de 1 hora con especialista'
+    case 'course':  return 'Ej. 8 semanas de práctica guiada, acceso de por vida'
+    case 'support': return 'Ej. Atención prioritaria para resolver tu problema'
+    case 'faq':     return 'Ej. Todo lo que necesitas saber antes de comprar'
+    default:        return 'Ej. Incluye X, Y y Z. Ideal para clientes que...'
   }
 }
 
@@ -139,7 +159,10 @@ MENÚ DE BIENVENIDA
 Al iniciar cualquier conversación, presenta el menú numerado de opciones disponibles.
 Ejemplo de formato:
 "¡Hola! 👋 ¿En qué te puedo ayudar hoy?
-${w.catalogItems.filter(i => i.offer.trim()).map((item, idx) => `${idx + 1}️⃣ ${item.offer}${item.price ? ` — ${item.price}` : ''}`).join('\n')}
+${w.catalogItems.filter(i => i.title.trim()).map((item, idx) => {
+  const price = formatPrice(item)
+  return `${idx + 1}️⃣ ${item.title}${price ? ` — ${price}` : ''}`
+}).join('\n')}
 
 Responde con el número de tu elección o escribe tu pregunta."
 
@@ -176,16 +199,22 @@ Tu objetivo es: ENTENDER → GUIAR → CONVERTIR`
 
 function generateKnowledgeContent(w: WizardData): string {
   const objLabel = OBJECTIVES.find(o => o.id === w.objective)?.label || 'Asistente general'
-  const validItems = w.catalogItems.filter(i => i.offer.trim())
+  const validItems = w.catalogItems.filter(i => i.title.trim())
 
   const catalogSection = validItems.length > 0
-    ? validItems.map((item, idx) => `OPCIÓN ${idx + 1}: ${item.offer.toUpperCase()}
+    ? validItems.map((item, idx) => `OPCIÓN ${idx + 1}: ${item.title.toUpperCase()}
 
-Nombre / descripción:
-${item.offer}
+Nombre:
+${item.title}
+
+Descripción / beneficio:
+${item.benefit || '[Sin descripción]'}
 
 Precio:
-${item.price || '[No especificado]'}
+${formatPrice(item) || '[No especificado]'}
+
+Instrucción de precio para el bot:
+${priceInstruction(item)}
 
 Siguiente paso del cliente:
 ${item.nextStep || '[No especificado]'}
@@ -194,7 +223,10 @@ ${item.nextStep || '[No especificado]'}
     : `[Sin productos/servicios definidos]`
 
   const menuPreview = validItems.length > 0
-    ? validItems.map((item, idx) => `${idx + 1}️⃣ ${item.offer}${item.price ? ` — ${item.price}` : ''}`).join('\n')
+    ? validItems.map((item, idx) => {
+        const price = formatPrice(item)
+        return `${idx + 1}️⃣ ${item.title}${price ? ` — ${price}` : ''}`
+      }).join('\n')
     : '[Sin opciones definidas]'
 
   return `DOCUMENTO DE CONOCIMIENTO – ${(w.businessName || 'MI NEGOCIO').toUpperCase()}
@@ -522,37 +554,81 @@ export default function TabPrompt({ companyId }: { companyId: string }) {
                     )}
                   </div>
 
+                  {/* Título del menú */}
                   <div className="space-y-1.5">
                     <Label>
-                      {wizard.objective === 'faq'     ? '¿Sobre qué tema responde?' :
-                       wizard.objective === 'appoint' ? '¿Qué cita o servicio ofreces?' :
-                       wizard.objective === 'course'  ? '¿Qué curso o membresía?' :
-                       '¿Qué vendes o qué ofreces?'}
+                      {wizard.objective === 'faq'     ? 'Nombre del tema' :
+                       wizard.objective === 'appoint' ? 'Nombre del servicio o cita' :
+                       wizard.objective === 'course'  ? 'Nombre del curso o membresía' :
+                       'Nombre del producto o servicio'}
+                      <span className="text-muted-foreground font-normal text-xs ml-1">(aparece en el menú)</span>
                     </Label>
                     <Input
-                      placeholder={getOfferPlaceholder(wizard.objective)}
-                      value={item.offer}
-                      onChange={e => updateCatalogItem(item.id, 'offer', e.target.value)}
+                      placeholder={getTitlePlaceholder(wizard.objective)}
+                      value={item.title}
+                      onChange={e => updateCatalogItem(item.id, 'title', e.target.value)}
                     />
                   </div>
 
-                  <div className="grid grid-cols-2 gap-3">
-                    <div className="space-y-1.5">
-                      <Label>Precio</Label>
-                      <Input
-                        placeholder={getPricePlaceholder(wizard.objective)}
-                        value={item.price}
-                        onChange={e => updateCatalogItem(item.id, 'price', e.target.value)}
-                      />
+                  {/* Beneficio / descripción */}
+                  <div className="space-y-1.5">
+                    <Label>
+                      Descripción breve
+                      <span className="text-muted-foreground font-normal text-xs ml-1">(el bot la usa para explicar al cliente)</span>
+                    </Label>
+                    <Input
+                      placeholder={getBenefitPlaceholder(wizard.objective)}
+                      value={item.benefit}
+                      onChange={e => updateCatalogItem(item.id, 'benefit', e.target.value)}
+                    />
+                  </div>
+
+                  {/* Precio: tipo + valor */}
+                  <div className="space-y-2">
+                    <Label>Precio</Label>
+                    <div className="grid grid-cols-3 gap-2">
+                      {([
+                        { type: 'fixed', label: 'Precio fijo',  hint: 'Ej. $1,200' },
+                        { type: 'from',  label: 'Desde...',     hint: 'Ej. Desde $500' },
+                        { type: 'quote', label: 'A cotizar',    hint: 'El bot redirige al asesor' },
+                      ] as const).map(opt => (
+                        <button
+                          key={opt.type}
+                          type="button"
+                          onClick={() => updateCatalogItem(item.id, 'priceType', opt.type)}
+                          className={`p-2.5 rounded-lg border text-left transition-all ${
+                            item.priceType === opt.type
+                              ? 'border-foreground bg-foreground/5'
+                              : 'border-border hover:border-foreground/40'
+                          }`}
+                        >
+                          <p className="text-xs font-medium">{opt.label}</p>
+                          <p className="text-xs text-muted-foreground mt-0.5 leading-tight">{opt.hint}</p>
+                        </button>
+                      ))}
                     </div>
-                    <div className="space-y-1.5">
-                      <Label>Siguiente paso del cliente</Label>
+                    {item.priceType !== 'quote' && (
                       <Input
-                        placeholder={getNextStepPlaceholder(wizard.objective)}
-                        value={item.nextStep}
-                        onChange={e => updateCatalogItem(item.id, 'nextStep', e.target.value)}
+                        placeholder={item.priceType === 'from' ? 'Ej. $500' : 'Ej. $1,200'}
+                        value={item.priceValue}
+                        onChange={e => updateCatalogItem(item.id, 'priceValue', e.target.value)}
                       />
-                    </div>
+                    )}
+                    {item.priceType === 'quote' && (
+                      <p className="text-xs text-muted-foreground border border-dashed border-border rounded-lg p-2.5">
+                        Cuando el cliente pregunte por el precio, el bot responderá que varía según sus necesidades y ofrecerá conectarlo con un asesor.
+                      </p>
+                    )}
+                  </div>
+
+                  {/* Siguiente paso */}
+                  <div className="space-y-1.5">
+                    <Label>Siguiente paso del cliente</Label>
+                    <Input
+                      placeholder={getNextStepPlaceholder(wizard.objective)}
+                      value={item.nextStep}
+                      onChange={e => updateCatalogItem(item.id, 'nextStep', e.target.value)}
+                    />
                   </div>
                 </Card>
               ))}
@@ -566,14 +642,17 @@ export default function TabPrompt({ companyId }: { companyId: string }) {
             </div>
 
             {/* Preview del menú de WhatsApp */}
-            {wizard.catalogItems.some(i => i.offer.trim()) && (
+            {wizard.catalogItems.some(i => i.title.trim()) && (
               <div className="rounded-xl bg-[#0b1f0e] p-4 space-y-2">
                 <p className="text-xs text-green-400 font-medium">Vista previa — menú en WhatsApp</p>
                 <p className="text-sm text-green-100 whitespace-pre-line font-mono leading-relaxed">
                   {`¡Hola! 👋 ¿En qué te puedo ayudar?\n\n`}
                   {wizard.catalogItems
-                    .filter(i => i.offer.trim())
-                    .map((item, idx) => `${idx + 1}️⃣ ${item.offer}${item.price ? ` — ${item.price}` : ''}`)
+                    .filter(i => i.title.trim())
+                    .map((item, idx) => {
+                      const price = formatPrice(item)
+                      return `${idx + 1}️⃣ ${item.title}${price ? ` — ${price}` : ''}`
+                    })
                     .join('\n')}
                   {`\n\nResponde con el número de tu elección.`}
                 </p>
@@ -584,7 +663,7 @@ export default function TabPrompt({ companyId }: { companyId: string }) {
               <Button variant="outline" className="flex-1" onClick={() => setWizardStep(2)}>← Atrás</Button>
               <Button
                 className="flex-1"
-                disabled={!wizard.catalogItems.some(i => i.offer.trim())}
+                disabled={!wizard.catalogItems.some(i => i.title.trim())}
                 onClick={() => setWizardStep(4)}
               >
                 Continuar →
