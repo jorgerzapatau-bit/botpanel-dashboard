@@ -668,12 +668,9 @@ export default function TabPrompt({ companyId }: { companyId: string }) {
                 className="flex-1"
                 disabled={!wizard.catalogItems.some(i => i.title.trim())}
                 onClick={() => {
-                  // Pre-llena el mensaje de bienvenida con el menú generado,
-                  // solo si el usuario no lo ha editado manualmente antes
-                  setWizard(w => ({
-                    ...w,
-                    welcomeMessage: w.welcomeMessage.trim() ? w.welcomeMessage : generateMenuText(w),
-                  }))
+                  // Siempre regenera el mensaje de bienvenida al avanzar al paso 4
+                  // para que refleje el catálogo actual (puede haber cambiado)
+                  setWizard(w => ({ ...w, welcomeMessage: generateMenuText(w) }))
                   setWizardStep(4)
                 }}
               >
