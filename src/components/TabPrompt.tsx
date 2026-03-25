@@ -5,14 +5,14 @@ import { supabase } from '@/lib/supabase'
 import { Card } from '@/components/ui/card'
 import { Label } from '@/components/ui/label'
 import { Input } from '@/components/ui/input'
-import { Textarea } from '@/components/ui/textarea'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Separator } from '@/components/ui/separator'
+import { Textarea } from '@/components/ui/textarea'
 import { toast } from 'sonner'
 import type { BotConfig, BotKnowledge } from '@/types'
 
-// ─── Wizard config ────────────────────────────────────────────────────────────
+// ─── Wizard config ─────────────────────────────────────────────────────────────
 
 const OBJECTIVES = [
   { id: 'sell',     emoji: '🛒', label: 'Vender producto o servicio',     desc: 'El bot guía al cliente hacia una compra' },
@@ -29,18 +29,90 @@ const TONES = [
 ]
 
 const STYLE_OPTIONS = [
-  { value: 'corto',     label: 'Corto',     desc: 'Respuestas breves y directas',       tokens: 100 },
-  { value: 'medio',     label: 'Medio',     desc: 'Balance entre detalle y brevedad',   tokens: 200 },
-  { value: 'detallado', label: 'Detallado', desc: 'Respuestas completas y extensas',    tokens: 400 },
+  { value: 'corto',     label: 'Corto',     desc: 'Respuestas breves y directas',     tokens: 100 },
+  { value: 'medio',     label: 'Medio',     desc: 'Balance entre detalle y brevedad', tokens: 200 },
+  { value: 'detallado', label: 'Detallado', desc: 'Respuestas completas y extensas',  tokens: 400 },
 ]
 
 const CREATIVITY_OPTIONS = [
-  { value: 'preciso',     label: 'Preciso',     desc: 'Respuestas exactas y consistentes',   temp: 0.3 },
-  { value: 'balanceado',  label: 'Balanceado',  desc: 'Mezcla de precisión y creatividad',   temp: 0.7 },
-  { value: 'creativo',    label: 'Creativo',    desc: 'Respuestas variadas y expresivas',     temp: 1.0 },
+  { value: 'preciso',    label: 'Preciso',    desc: 'Respuestas exactas y consistentes', temp: 0.3 },
+  { value: 'balanceado', label: 'Balanceado', desc: 'Mezcla de precisión y creatividad', temp: 0.7 },
+  { value: 'creativo',   label: 'Creativo',   desc: 'Respuestas variadas y expresivas',  temp: 1.0 },
 ]
 
-// ─── Prompt generator ─────────────────────────────────────────────────────────
+// ─── Types ─────────────────────────────────────────────────────────────────────
+
+type CatalogItem = {
+  id: string
+  offer: string        // qué ofreces / nombre del servicio
+  price: string        // precio (texto libre)
+  nextStep: string     // siguiente paso del cliente
+}
+
+type WizardData = {
+  // Paso 1
+  objective: string
+  // Paso 2a — datos fijos
+  businessName: string
+  businessType: string
+  // Paso 2b — catálogo repetible
+  catalogItems: CatalogItem[]
+  // Paso 3
+  botName: string
+  tone: string
+  transferPhone: string
+  welcomeMessage: string
+  style: string
+  creativity: string
+}
+
+const newCatalogItem = (): CatalogItem => ({
+  id: Math.random().toString(36).slice(2),
+  offer: '',
+  price: '',
+  nextStep: '',
+})
+
+const emptyWizard = (): WizardData => ({
+  objective: '',
+  businessName: '', businessType: '',
+  catalogItems: [newCatalogItem()],
+  botName: '', tone: 'friendly', transferPhone: '', welcomeMessage: '',
+  style: 'medio', creativity: 'balanceado',
+})
+
+// ─── Helpers para placeholders según objetivo ──────────────────────────────────
+
+function getOfferPlaceholder(objective: string): string {
+  switch (objective) {
+    case 'appoint': return 'Ej. Consulta nutricional 1hr'
+    case 'course':  return 'Ej. Curso de meditación'
+    case 'support': return 'Ej. Soporte técnico básico'
+    case 'faq':     return 'Ej. Información general'
+    default:        return 'Ej. Plan mensual premium'
+  }
+}
+
+function getPricePlaceholder(objective: string): string {
+  switch (objective) {
+    case 'appoint': return 'Ej. $350 / Gratis'
+    case 'course':  return 'Ej. $499 / $299 al mes'
+    case 'support': return 'Ej. Incluido / $200'
+    case 'faq':     return 'Ej. Sin costo'
+    default:        return 'Ej. $1,200'
+  }
+}
+
+function getNextStepPlaceholder(objective: string): string {
+  switch (objective) {
+    case 'appoint': return 'Ej. Escribir para confirmar fecha'
+    case 'sell':    return 'Ej. Clic en link de pago'
+    case 'course':  return 'Ej. Inscribirse en el formulario'
+    default:        return 'Ej. Contactar al asesor'
+  }
+}
+
+// ─── Generadores de prompt y knowledge ────────────────────────────────────────
 
 function generatePersonalityPrompt(w: WizardData): string {
   const toneMap: Record<string, string> = {
@@ -62,6 +134,14 @@ Tu estilo de comunicación es: ${toneMap[w.tone] || 'amigable y profesional'}.
 
 TU OBJETIVO PRINCIPAL
 Tu función es ${objMap[w.objective] || 'ayudar al cliente y guiarlo hacia una acción.'}
+
+MENÚ DE BIENVENIDA
+Al iniciar cualquier conversación, presenta el menú numerado de opciones disponibles.
+Ejemplo de formato:
+"¡Hola! 👋 ¿En qué te puedo ayudar hoy?
+${w.catalogItems.filter(i => i.offer.trim()).map((item, idx) => `${idx + 1}️⃣ ${item.offer}${item.price ? ` — ${item.price}` : ''}`).join('\n')}
+
+Responde con el número de tu elección o escribe tu pregunta."
 
 ESTRUCTURA DE RESPUESTA
 Cada respuesta debe incluir:
@@ -96,6 +176,26 @@ Tu objetivo es: ENTENDER → GUIAR → CONVERTIR`
 
 function generateKnowledgeContent(w: WizardData): string {
   const objLabel = OBJECTIVES.find(o => o.id === w.objective)?.label || 'Asistente general'
+  const validItems = w.catalogItems.filter(i => i.offer.trim())
+
+  const catalogSection = validItems.length > 0
+    ? validItems.map((item, idx) => `OPCIÓN ${idx + 1}: ${item.offer.toUpperCase()}
+
+Nombre / descripción:
+${item.offer}
+
+Precio:
+${item.price || '[No especificado]'}
+
+Siguiente paso del cliente:
+${item.nextStep || '[No especificado]'}
+
+---`).join('\n\n')
+    : `[Sin productos/servicios definidos]`
+
+  const menuPreview = validItems.length > 0
+    ? validItems.map((item, idx) => `${idx + 1}️⃣ ${item.offer}${item.price ? ` — ${item.price}` : ''}`).join('\n')
+    : '[Sin opciones definidas]'
 
   return `DOCUMENTO DE CONOCIMIENTO – ${(w.businessName || 'MI NEGOCIO').toUpperCase()}
 
@@ -126,99 +226,36 @@ Horario de atención:
 ---
 
 =====================================
-2. ${w.objective === 'faq' ? 'PREGUNTAS FRECUENTES' : 'PRODUCTOS / SERVICIOS'}
+2. CATÁLOGO DE ${w.objective === 'faq' ? 'TEMAS' : w.objective === 'appoint' ? 'SERVICIOS / CITAS' : 'PRODUCTOS / SERVICIOS'}
 =====================================
 
-${w.mainOffer ? `OFERTA PRINCIPAL\n\n${w.mainOffer}\n\n---` : `PRODUCTO O SERVICIO 1
-
-Nombre:
-[Nombre]
-
-Qué es:
-[Descripción en 1-2 líneas]
-
-Beneficio principal:
-[Por qué le importa al cliente]
-
-Precio:
-[Ej: $500 MXN / Desde $X / Consultar]
-
-Enlace o forma de compra:
-[URL / WhatsApp / Sucursal]
-
----`}
-
-=====================================
-3. PROCESO DE ${w.objective === 'appoint' ? 'AGENDAMIENTO' : w.objective === 'support' ? 'SOPORTE' : 'COMPRA O CONTACTO'}
-=====================================
-
-Pasos para el cliente:
-1. [Primer paso]
-2. [Segundo paso]
-3. [Tercer paso]
-
-${w.nextStep ? `El siguiente paso concreto que debe dar el cliente:\n${w.nextStep}` : ''}
+MENÚ PRINCIPAL DEL BOT:
+${menuPreview}
 
 ---
 
-=====================================
-4. RESPUESTAS OFICIALES
-=====================================
-
-Cuando pregunten por precios:
-"[Tu respuesta oficial sobre precios]"
-
-Cuando pregunten por disponibilidad:
-"[Tu respuesta sobre disponibilidad]"
-
----
+${catalogSection}
 
 =====================================
-5. RESTRICCIONES
+3. RESTRICCIONES
 =====================================
 
 - No inventar información
-- No estimar precios
+- No estimar precios que no están definidos
 - No prometer resultados específicos
 - No responder temas fuera del negocio
 
 ---
 
 =====================================
-6. CONTROL DE DESCONOCIMIENTO
+4. CONTROL DE DESCONOCIMIENTO
 =====================================
 
 Si no existe información, responder EXACTAMENTE:
 "No tengo esa información en este momento. ¿Deseas que te transfiera con un asesor?"`
 }
 
-// ─── Types ────────────────────────────────────────────────────────────────────
-
-type WizardData = {
-  // Step 1
-  objective: string
-  // Step 2
-  businessName: string
-  businessType: string
-  mainOffer: string
-  nextStep: string
-  // Step 3
-  botName: string
-  tone: string
-  transferPhone: string
-  welcomeMessage: string
-  style: string
-  creativity: string
-}
-
-const emptyWizard = (): WizardData => ({
-  objective: '',
-  businessName: '', businessType: '', mainOffer: '', nextStep: '',
-  botName: '', tone: 'friendly', transferPhone: '', welcomeMessage: '',
-  style: 'medio', creativity: 'balanceado',
-})
-
-// ─── Main component ───────────────────────────────────────────────────────────
+// ─── Main component ────────────────────────────────────────────────────────────
 
 export default function TabPrompt({ companyId }: { companyId: string }) {
   const [config, setConfig] = useState<Partial<BotConfig>>({})
@@ -235,6 +272,17 @@ export default function TabPrompt({ companyId }: { companyId: string }) {
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null)
   const [showAdvanced, setShowAdvanced] = useState(false)
 
+  // Total de pasos ahora son 4 (1, 2a, 2b, 3)
+  const TOTAL_STEPS = 4
+  const stepLabel = (s: number) => {
+    switch (s) {
+      case 1: return '¿En qué se va a enfocar tu bot?'
+      case 2: return 'Datos de tu negocio'
+      case 3: return 'Tus productos o servicios'
+      case 4: return '¿Cómo va a hablar tu bot?'
+    }
+  }
+
   const fetchAll = async () => {
     const { data: cfg } = await supabase.from('bot_config').select('*').eq('company_id', companyId).single()
     if (cfg) { setConfig(cfg); setHasConfig(true) }
@@ -245,6 +293,23 @@ export default function TabPrompt({ companyId }: { companyId: string }) {
 
   useEffect(() => { fetchAll() }, [companyId])
 
+  // ─── Catalog helpers ───────────────────────────────────────────────────────
+
+  const updateCatalogItem = (id: string, field: keyof CatalogItem, value: string) => {
+    setWizard(w => ({
+      ...w,
+      catalogItems: w.catalogItems.map(item => item.id === id ? { ...item, [field]: value } : item),
+    }))
+  }
+
+  const addCatalogItem = () => {
+    setWizard(w => ({ ...w, catalogItems: [...w.catalogItems, newCatalogItem()] }))
+  }
+
+  const removeCatalogItem = (id: string) => {
+    setWizard(w => ({ ...w, catalogItems: w.catalogItems.filter(item => item.id !== id) }))
+  }
+
   // ─── Wizard save ───────────────────────────────────────────────────────────
 
   const handleWizardSave = async () => {
@@ -254,7 +319,6 @@ export default function TabPrompt({ companyId }: { companyId: string }) {
     const styleObj = STYLE_OPTIONS.find(s => s.value === wizard.style)
     const creativityObj = CREATIVITY_OPTIONS.find(c => c.value === wizard.creativity)
 
-    // Save bot_config
     const { error: cfgErr } = await supabase.from('bot_config').upsert({
       company_id: companyId,
       bot_name: wizard.botName,
@@ -273,7 +337,6 @@ export default function TabPrompt({ companyId }: { companyId: string }) {
 
     if (cfgErr) { toast.error('Error guardando configuración'); setSaving(false); return }
 
-    // Save bot_knowledge (deactivate others, create new)
     await supabase.from('bot_knowledge').update({ active: false }).eq('company_id', companyId)
     const objLabel = OBJECTIVES.find(o => o.id === wizard.objective)?.label || 'Asistente'
     const { error: kErr } = await supabase.from('bot_knowledge').insert({
@@ -292,7 +355,7 @@ export default function TabPrompt({ companyId }: { companyId: string }) {
     setSaving(false)
   }
 
-  // ─── Knowledge actions ────────────────────────────────────────────────────
+  // ─── Knowledge actions ─────────────────────────────────────────────────────
 
   const handleActivate = async (id: string) => {
     await supabase.from('bot_knowledge').update({ active: false }).eq('company_id', companyId)
@@ -326,31 +389,34 @@ export default function TabPrompt({ companyId }: { companyId: string }) {
 
   if (loading) return <p className="text-sm text-muted-foreground">Cargando...</p>
 
-  // ─── Wizard UI ────────────────────────────────────────────────────────────
+  // ─── Wizard UI ─────────────────────────────────────────────────────────────
 
   if (showWizard) {
     return (
       <div className="space-y-6 max-w-2xl mx-auto">
-        {/* Progress */}
+        {/* Progress bar */}
         <div className="space-y-2">
           <div className="flex items-center justify-between text-xs text-muted-foreground">
-            <span>Paso {wizardStep} de 3</span>
-            <button onClick={() => { setShowWizard(false); setWizardStep(1) }}
-              className="hover:text-foreground transition-colors">✕ Cancelar</button>
+            <span>Paso {wizardStep} de {TOTAL_STEPS}</span>
+            <button
+              onClick={() => { setShowWizard(false); setWizardStep(1) }}
+              className="hover:text-foreground transition-colors"
+            >
+              ✕ Cancelar
+            </button>
           </div>
           <div className="flex gap-1.5">
-            {[1, 2, 3].map(s => (
-              <div key={s} className={`h-1.5 flex-1 rounded-full transition-all ${s <= wizardStep ? 'bg-foreground' : 'bg-muted'}`} />
+            {Array.from({ length: TOTAL_STEPS }, (_, i) => i + 1).map(s => (
+              <div
+                key={s}
+                className={`h-1.5 flex-1 rounded-full transition-all ${s <= wizardStep ? 'bg-foreground' : 'bg-muted'}`}
+              />
             ))}
           </div>
-          <p className="text-xs text-muted-foreground">
-            {wizardStep === 1 && '¿En qué se va a enfocar tu bot?'}
-            {wizardStep === 2 && 'Cuéntame sobre tu negocio'}
-            {wizardStep === 3 && '¿Cómo va a hablar tu bot?'}
-          </p>
+          <p className="text-xs text-muted-foreground">{stepLabel(wizardStep)}</p>
         </div>
 
-        {/* Step 1 — Objetivo */}
+        {/* ── Paso 1 — Objetivo ─────────────────────────────────────────────── */}
         {wizardStep === 1 && (
           <div className="space-y-4">
             <div>
@@ -359,12 +425,15 @@ export default function TabPrompt({ companyId }: { companyId: string }) {
             </div>
             <div className="space-y-2">
               {OBJECTIVES.map(obj => (
-                <button key={obj.id} onClick={() => setWizard(w => ({ ...w, objective: obj.id }))}
+                <button
+                  key={obj.id}
+                  onClick={() => setWizard(w => ({ ...w, objective: obj.id }))}
                   className={`w-full flex items-center gap-4 p-4 rounded-xl border text-left transition-all ${
                     wizard.objective === obj.id
                       ? 'border-foreground bg-foreground/5 ring-1 ring-foreground'
                       : 'border-border hover:border-foreground/40'
-                  }`}>
+                  }`}
+                >
                   <span className="text-2xl shrink-0">{obj.emoji}</span>
                   <div>
                     <p className="text-sm font-medium">{obj.label}</p>
@@ -376,73 +445,156 @@ export default function TabPrompt({ companyId }: { companyId: string }) {
                 </button>
               ))}
             </div>
-            <Button className="w-full" disabled={!wizard.objective}
-              onClick={() => setWizardStep(2)}>
+            <Button className="w-full" disabled={!wizard.objective} onClick={() => setWizardStep(2)}>
               Continuar →
             </Button>
           </div>
         )}
 
-        {/* Step 2 — Negocio */}
+        {/* ── Paso 2a — Datos fijos del negocio ─────────────────────────────── */}
         {wizardStep === 2 && (
           <div className="space-y-4">
             <div>
-              <h2 className="text-lg font-semibold">Cuéntame sobre tu negocio</h2>
-              <p className="text-sm text-muted-foreground mt-1">Con esta información el bot sabrá exactamente qué decir.</p>
+              <h2 className="text-lg font-semibold">Datos de tu negocio</h2>
+              <p className="text-sm text-muted-foreground mt-1">Información general que aplica a todo tu negocio.</p>
             </div>
             <Card className="p-5 space-y-4">
               <div className="space-y-1.5">
                 <Label>¿Cómo se llama tu negocio? *</Label>
-                <Input placeholder="Ej. NutriSport Pro, Clínica Bienestar..." value={wizard.businessName}
-                  onChange={e => setWizard(w => ({ ...w, businessName: e.target.value }))} />
-              </div>
-              <div className="space-y-1.5">
-                <Label>¿Qué tipo de negocio es?</Label>
-                <Input placeholder="Ej. Tienda de suplementos / Clínica / Academia online..." value={wizard.businessType}
-                  onChange={e => setWizard(w => ({ ...w, businessType: e.target.value }))} />
-              </div>
-              <div className="space-y-1.5">
-                <Label>
-                  {wizard.objective === 'faq'    ? '¿Cuáles son las preguntas más comunes que recibes?' :
-                   wizard.objective === 'appoint' ? '¿Qué servicio o cita ofreces?' :
-                   wizard.objective === 'support' ? '¿Qué tipo de soporte necesitan tus clientes?' :
-                   '¿Qué vendes exactamente?'}
-                  {' '}<span className="text-muted-foreground font-normal text-xs">(describe con detalle)</span>
-                </Label>
-                <Textarea
-                  placeholder={
-                    wizard.objective === 'course'
-                      ? 'Ej. Curso de meditación $499, Membresía mensual $299, Taller presencial $800...'
-                      : wizard.objective === 'appoint'
-                      ? 'Ej. Consulta nutricional 1hr, Sesión de coaching, Cita médica general...'
-                      : 'Describe tus productos o servicios principales con precios si es posible...'
-                  }
-                  className="min-h-[120px]"
-                  value={wizard.mainOffer}
-                  onChange={e => setWizard(w => ({ ...w, mainOffer: e.target.value }))} />
-              </div>
-              <div className="space-y-1.5">
-                <Label>¿Cuál es el siguiente paso que debe dar el cliente?</Label>
                 <Input
-                  placeholder={
-                    wizard.objective === 'appoint' ? 'Ej. Escribir al asesor para confirmar fecha y hora' :
-                    wizard.objective === 'sell'    ? 'Ej. Hacer clic en el link de pago / Llamar al número X' :
-                    'Ej. Contactar por WhatsApp al número...'
-                  }
-                  value={wizard.nextStep}
-                  onChange={e => setWizard(w => ({ ...w, nextStep: e.target.value }))} />
+                  placeholder="Ej. NutriSport Pro, Clínica Bienestar, Academia Online..."
+                  value={wizard.businessName}
+                  onChange={e => setWizard(w => ({ ...w, businessName: e.target.value }))}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label>¿Qué tipo de negocio es? *</Label>
+                <Input
+                  placeholder="Ej. Tienda de suplementos / Clínica dental / Academia online..."
+                  value={wizard.businessType}
+                  onChange={e => setWizard(w => ({ ...w, businessType: e.target.value }))}
+                />
               </div>
             </Card>
             <div className="flex gap-3">
               <Button variant="outline" className="flex-1" onClick={() => setWizardStep(1)}>← Atrás</Button>
-              <Button className="flex-1" disabled={!wizard.businessName.trim()}
-                onClick={() => setWizardStep(3)}>Continuar →</Button>
+              <Button
+                className="flex-1"
+                disabled={!wizard.businessName.trim() || !wizard.businessType.trim()}
+                onClick={() => setWizardStep(3)}
+              >
+                Continuar →
+              </Button>
             </div>
           </div>
         )}
 
-        {/* Step 3 — Personalidad */}
+        {/* ── Paso 2b — Catálogo de productos/servicios ─────────────────────── */}
         {wizardStep === 3 && (
+          <div className="space-y-4">
+            <div>
+              <h2 className="text-lg font-semibold">
+                {wizard.objective === 'faq'     ? 'Temas que maneja tu bot' :
+                 wizard.objective === 'appoint' ? 'Servicios o citas disponibles' :
+                 wizard.objective === 'course'  ? 'Cursos o membresías' :
+                 wizard.objective === 'support' ? 'Tipos de soporte' :
+                 'Productos o servicios'}
+              </h2>
+              <p className="text-sm text-muted-foreground mt-1">
+                Cada opción que agregues aparecerá como una entrada numerada en el menú del chat.
+              </p>
+            </div>
+
+            <div className="space-y-3">
+              {wizard.catalogItems.map((item, idx) => (
+                <Card key={item.id} className="p-4 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+                      Opción {idx + 1}
+                    </span>
+                    {wizard.catalogItems.length > 1 && (
+                      <button
+                        onClick={() => removeCatalogItem(item.id)}
+                        className="text-xs text-muted-foreground hover:text-destructive transition-colors"
+                      >
+                        ✕ quitar
+                      </button>
+                    )}
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <Label>
+                      {wizard.objective === 'faq'     ? '¿Sobre qué tema responde?' :
+                       wizard.objective === 'appoint' ? '¿Qué cita o servicio ofreces?' :
+                       wizard.objective === 'course'  ? '¿Qué curso o membresía?' :
+                       '¿Qué vendes o qué ofreces?'}
+                    </Label>
+                    <Input
+                      placeholder={getOfferPlaceholder(wizard.objective)}
+                      value={item.offer}
+                      onChange={e => updateCatalogItem(item.id, 'offer', e.target.value)}
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="space-y-1.5">
+                      <Label>Precio</Label>
+                      <Input
+                        placeholder={getPricePlaceholder(wizard.objective)}
+                        value={item.price}
+                        onChange={e => updateCatalogItem(item.id, 'price', e.target.value)}
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label>Siguiente paso del cliente</Label>
+                      <Input
+                        placeholder={getNextStepPlaceholder(wizard.objective)}
+                        value={item.nextStep}
+                        onChange={e => updateCatalogItem(item.id, 'nextStep', e.target.value)}
+                      />
+                    </div>
+                  </div>
+                </Card>
+              ))}
+
+              <button
+                onClick={addCatalogItem}
+                className="w-full flex items-center justify-center gap-2 p-3 rounded-xl border border-dashed border-border text-sm text-muted-foreground hover:border-foreground/40 hover:text-foreground transition-all"
+              >
+                + Agregar otra opción
+              </button>
+            </div>
+
+            {/* Preview del menú de WhatsApp */}
+            {wizard.catalogItems.some(i => i.offer.trim()) && (
+              <div className="rounded-xl bg-[#0b1f0e] p-4 space-y-2">
+                <p className="text-xs text-green-400 font-medium">Vista previa — menú en WhatsApp</p>
+                <p className="text-sm text-green-100 whitespace-pre-line font-mono leading-relaxed">
+                  {`¡Hola! 👋 ¿En qué te puedo ayudar?\n\n`}
+                  {wizard.catalogItems
+                    .filter(i => i.offer.trim())
+                    .map((item, idx) => `${idx + 1}️⃣ ${item.offer}${item.price ? ` — ${item.price}` : ''}`)
+                    .join('\n')}
+                  {`\n\nResponde con el número de tu elección.`}
+                </p>
+              </div>
+            )}
+
+            <div className="flex gap-3">
+              <Button variant="outline" className="flex-1" onClick={() => setWizardStep(2)}>← Atrás</Button>
+              <Button
+                className="flex-1"
+                disabled={!wizard.catalogItems.some(i => i.offer.trim())}
+                onClick={() => setWizardStep(4)}
+              >
+                Continuar →
+              </Button>
+            </div>
+          </div>
+        )}
+
+        {/* ── Paso 3 — Personalidad ──────────────────────────────────────────── */}
+        {wizardStep === 4 && (
           <div className="space-y-4">
             <div>
               <h2 className="text-lg font-semibold">¿Cómo va a hablar tu bot?</h2>
@@ -452,13 +604,19 @@ export default function TabPrompt({ companyId }: { companyId: string }) {
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-1.5">
                   <Label>Nombre del bot *</Label>
-                  <Input placeholder="Ej. Claudia, Max, Asistente..." value={wizard.botName}
-                    onChange={e => setWizard(w => ({ ...w, botName: e.target.value }))} />
+                  <Input
+                    placeholder="Ej. Claudia, Max, Asistente..."
+                    value={wizard.botName}
+                    onChange={e => setWizard(w => ({ ...w, botName: e.target.value }))}
+                  />
                 </div>
                 <div className="space-y-1.5">
                   <Label>Mensaje de bienvenida</Label>
-                  <Input placeholder="Ej. ¡Hola! Soy Claudia 👋 ¿En qué te ayudo?" value={wizard.welcomeMessage}
-                    onChange={e => setWizard(w => ({ ...w, welcomeMessage: e.target.value }))} />
+                  <Input
+                    placeholder="Ej. ¡Hola! Soy Claudia 👋 ¿En qué te ayudo?"
+                    value={wizard.welcomeMessage}
+                    onChange={e => setWizard(w => ({ ...w, welcomeMessage: e.target.value }))}
+                  />
                 </div>
               </div>
 
@@ -466,10 +624,13 @@ export default function TabPrompt({ companyId }: { companyId: string }) {
                 <Label>Tono de comunicación</Label>
                 <div className="grid grid-cols-3 gap-2">
                   {TONES.map(t => (
-                    <button key={t.id} onClick={() => setWizard(w => ({ ...w, tone: t.id }))}
+                    <button
+                      key={t.id}
+                      onClick={() => setWizard(w => ({ ...w, tone: t.id }))}
                       className={`p-3 rounded-lg border text-left transition-all ${
                         wizard.tone === t.id ? 'border-foreground bg-foreground/5' : 'border-border hover:border-foreground/40'
-                      }`}>
+                      }`}
+                    >
                       <p className="text-sm font-medium">{t.label}</p>
                       <p className="text-xs text-muted-foreground mt-0.5">{t.desc}</p>
                     </button>
@@ -478,14 +639,22 @@ export default function TabPrompt({ companyId }: { companyId: string }) {
               </div>
 
               <div className="space-y-1.5">
-                <Label>Número del asesor humano <span className="text-muted-foreground font-normal text-xs">(opcional — si el bot no puede resolver)</span></Label>
-                <Input placeholder="529991234567 (con código de país, sin +)" value={wizard.transferPhone}
-                  onChange={e => setWizard(w => ({ ...w, transferPhone: e.target.value }))} />
+                <Label>
+                  Número del asesor humano{' '}
+                  <span className="text-muted-foreground font-normal text-xs">(opcional — si el bot no puede resolver)</span>
+                </Label>
+                <Input
+                  placeholder="529991234567 (con código de país, sin +)"
+                  value={wizard.transferPhone}
+                  onChange={e => setWizard(w => ({ ...w, transferPhone: e.target.value }))}
+                />
               </div>
 
-              {/* Advanced options */}
-              <button onClick={() => setShowAdvanced(v => !v)}
-                className="text-xs text-muted-foreground hover:text-foreground transition-colors flex items-center gap-1">
+              {/* Advanced */}
+              <button
+                onClick={() => setShowAdvanced(v => !v)}
+                className="text-xs text-muted-foreground hover:text-foreground transition-colors flex items-center gap-1"
+              >
                 {showAdvanced ? '▲' : '▼'} Opciones avanzadas (longitud y creatividad)
               </button>
 
@@ -495,10 +664,13 @@ export default function TabPrompt({ companyId }: { companyId: string }) {
                     <Label>Longitud de respuesta</Label>
                     <div className="grid grid-cols-3 gap-2">
                       {STYLE_OPTIONS.map(opt => (
-                        <button key={opt.value} onClick={() => setWizard(w => ({ ...w, style: opt.value }))}
+                        <button
+                          key={opt.value}
+                          onClick={() => setWizard(w => ({ ...w, style: opt.value }))}
                           className={`p-3 rounded-lg border text-left transition-all ${
                             wizard.style === opt.value ? 'border-foreground bg-foreground/5' : 'border-border hover:border-foreground/40'
-                          }`}>
+                          }`}
+                        >
                           <p className="text-sm font-medium">{opt.label}</p>
                           <p className="text-xs text-muted-foreground mt-0.5">{opt.desc}</p>
                         </button>
@@ -509,10 +681,13 @@ export default function TabPrompt({ companyId }: { companyId: string }) {
                     <Label>Creatividad</Label>
                     <div className="grid grid-cols-3 gap-2">
                       {CREATIVITY_OPTIONS.map(opt => (
-                        <button key={opt.value} onClick={() => setWizard(w => ({ ...w, creativity: opt.value }))}
+                        <button
+                          key={opt.value}
+                          onClick={() => setWizard(w => ({ ...w, creativity: opt.value }))}
                           className={`p-3 rounded-lg border text-left transition-all ${
                             wizard.creativity === opt.value ? 'border-foreground bg-foreground/5' : 'border-border hover:border-foreground/40'
-                          }`}>
+                          }`}
+                        >
                           <p className="text-sm font-medium">{opt.label}</p>
                           <p className="text-xs text-muted-foreground mt-0.5">{opt.desc}</p>
                         </button>
@@ -524,8 +699,12 @@ export default function TabPrompt({ companyId }: { companyId: string }) {
             </Card>
 
             <div className="flex gap-3">
-              <Button variant="outline" className="flex-1" onClick={() => setWizardStep(2)}>← Atrás</Button>
-              <Button className="flex-1" disabled={!wizard.botName.trim() || saving} onClick={handleWizardSave}>
+              <Button variant="outline" className="flex-1" onClick={() => setWizardStep(3)}>← Atrás</Button>
+              <Button
+                className="flex-1"
+                disabled={!wizard.botName.trim() || saving}
+                onClick={handleWizardSave}
+              >
                 {saving ? 'Configurando...' : '✓ Activar mi bot'}
               </Button>
             </div>
@@ -535,7 +714,7 @@ export default function TabPrompt({ companyId }: { companyId: string }) {
     )
   }
 
-  // ─── Main view (after setup) ──────────────────────────────────────────────
+  // ─── Vista principal (después de configurar) ──────────────────────────────
 
   const activeKnowledge = knowledgeList.find(k => k.active)
 
@@ -547,7 +726,7 @@ export default function TabPrompt({ companyId }: { companyId: string }) {
         <div>
           <h2 className="text-lg font-medium">Asistente IA</h2>
           <p className="text-sm text-muted-foreground mt-0.5">
-            {hasConfig ? 'Tu bot está configurado y activo' : 'Configura tu bot en 3 pasos'}
+            {hasConfig ? 'Tu bot está configurado y activo' : 'Configura tu bot en 4 pasos'}
           </p>
         </div>
         <Button size="sm" onClick={() => { setWizard(emptyWizard()); setWizardStep(1); setShowWizard(true) }}>
@@ -562,7 +741,7 @@ export default function TabPrompt({ companyId }: { companyId: string }) {
           <div>
             <p className="text-base font-medium">Tu bot aún no está configurado</p>
             <p className="text-sm text-muted-foreground mt-1 max-w-xs mx-auto">
-              Responde 3 preguntas simples y tu bot estará listo para atender clientes en minutos.
+              Responde 4 pasos simples y tu bot estará listo para atender clientes en minutos.
             </p>
           </div>
           <Button onClick={() => { setWizard(emptyWizard()); setWizardStep(1); setShowWizard(true) }}>
@@ -615,11 +794,15 @@ export default function TabPrompt({ companyId }: { companyId: string }) {
             <Card key={k.id} className={`p-4 transition-all ${k.active ? 'ring-1 ring-green-400 bg-green-50/30' : ''}`}>
               {editingKnowledge?.id === k.id ? (
                 <div className="space-y-3">
-                  <Input value={editingKnowledge.name}
-                    onChange={e => setEditingKnowledge({ ...editingKnowledge, name: e.target.value })} />
-                  <Textarea value={editingKnowledge.content}
+                  <Input
+                    value={editingKnowledge.name}
+                    onChange={e => setEditingKnowledge({ ...editingKnowledge, name: e.target.value })}
+                  />
+                  <Textarea
+                    value={editingKnowledge.content}
                     onChange={e => setEditingKnowledge({ ...editingKnowledge, content: e.target.value })}
-                    className="min-h-[200px] font-mono text-xs" />
+                    className="min-h-[200px] font-mono text-xs"
+                  />
                   <div className="flex gap-2">
                     <Button variant="outline" size="sm" className="flex-1" onClick={() => setEditingKnowledge(null)}>Cancelar</Button>
                     <Button size="sm" className="flex-1" disabled={saving} onClick={handleSaveEditKnowledge}>
