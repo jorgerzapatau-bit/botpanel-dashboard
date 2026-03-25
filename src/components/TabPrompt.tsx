@@ -46,22 +46,18 @@ type PriceType = 'fixed' | 'from' | 'quote'
 
 type CatalogItem = {
   id: string
-  title: string        // nombre corto que aparece en el menú
-  benefit: string      // descripción breve del beneficio
-  priceType: PriceType // fixed | from | quote
-  priceValue: string   // monto (solo para fixed y from)
-  nextStep: string     // siguiente paso del cliente
+  title: string
+  benefit: string
+  priceType: PriceType
+  priceValue: string
+  nextStep: string
 }
 
 type WizardData = {
-  // Paso 1
   objective: string
-  // Paso 2a — datos fijos
   businessName: string
   businessType: string
-  // Paso 2b — catálogo repetible
   catalogItems: CatalogItem[]
-  // Paso 3
   botName: string
   tone: string
   transferPhone: string
@@ -79,14 +75,12 @@ const newCatalogItem = (): CatalogItem => ({
   nextStep: '',
 })
 
-// Formatea el precio para mostrarlo en el menú y en el knowledge doc
 function formatPrice(item: CatalogItem): string {
   if (item.priceType === 'quote') return 'Precio a cotizar'
   if (item.priceType === 'from')  return item.priceValue ? `Desde ${item.priceValue}` : 'Desde [monto]'
   return item.priceValue || ''
 }
 
-// Instrucción al bot sobre cómo manejar el precio según tipo
 function priceInstruction(item: CatalogItem): string {
   if (item.priceType === 'quote')
     return 'El precio de esta opción requiere cotización personalizada. Cuando el cliente pregunte por el precio, responde: "El precio varía según tus necesidades específicas. ¿Te conecto con un asesor para darte un presupuesto a medida?"'
@@ -132,7 +126,7 @@ function getNextStepPlaceholder(objective: string): string {
   }
 }
 
-// ─── Generadores de prompt y knowledge ────────────────────────────────────────
+// ─── Generadores ───────────────────────────────────────────────────────────────
 
 function generateMenuText(w: WizardData): string {
   const lines = w.catalogItems
@@ -307,7 +301,6 @@ export default function TabPrompt({ companyId }: { companyId: string }) {
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
 
-  // Wizard state
   const [showWizard, setShowWizard] = useState(false)
   const [wizardStep, setWizardStep] = useState(1)
   const [wizard, setWizard] = useState<WizardData>(emptyWizard())
@@ -315,7 +308,6 @@ export default function TabPrompt({ companyId }: { companyId: string }) {
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null)
   const [showAdvanced, setShowAdvanced] = useState(false)
 
-  // Total de pasos ahora son 4 (1, 2a, 2b, 3)
   const TOTAL_STEPS = 4
   const stepLabel = (s: number) => {
     switch (s) {
@@ -336,8 +328,6 @@ export default function TabPrompt({ companyId }: { companyId: string }) {
 
   useEffect(() => { fetchAll() }, [companyId])
 
-  // ─── Catalog helpers ───────────────────────────────────────────────────────
-
   const updateCatalogItem = (id: string, field: keyof CatalogItem, value: string) => {
     setWizard(w => ({
       ...w,
@@ -352,8 +342,6 @@ export default function TabPrompt({ companyId }: { companyId: string }) {
   const removeCatalogItem = (id: string) => {
     setWizard(w => ({ ...w, catalogItems: w.catalogItems.filter(item => item.id !== id) }))
   }
-
-  // ─── Wizard save ───────────────────────────────────────────────────────────
 
   const handleWizardSave = async () => {
     setSaving(true)
@@ -398,8 +386,6 @@ export default function TabPrompt({ companyId }: { companyId: string }) {
     setSaving(false)
   }
 
-  // ─── Knowledge actions ─────────────────────────────────────────────────────
-
   const handleActivate = async (id: string) => {
     await supabase.from('bot_knowledge').update({ active: false }).eq('company_id', companyId)
     await supabase.from('bot_knowledge').update({ active: true }).eq('id', id)
@@ -437,7 +423,6 @@ export default function TabPrompt({ companyId }: { companyId: string }) {
   if (showWizard) {
     return (
       <div className="space-y-6 max-w-2xl mx-auto">
-        {/* Progress bar */}
         <div className="space-y-2">
           <div className="flex items-center justify-between text-xs text-muted-foreground">
             <span>Paso {wizardStep} de {TOTAL_STEPS}</span>
@@ -459,7 +444,6 @@ export default function TabPrompt({ companyId }: { companyId: string }) {
           <p className="text-xs text-muted-foreground">{stepLabel(wizardStep)}</p>
         </div>
 
-        {/* ── Paso 1 — Objetivo ─────────────────────────────────────────────── */}
         {wizardStep === 1 && (
           <div className="space-y-4">
             <div>
@@ -494,7 +478,6 @@ export default function TabPrompt({ companyId }: { companyId: string }) {
           </div>
         )}
 
-        {/* ── Paso 2a — Datos fijos del negocio ─────────────────────────────── */}
         {wizardStep === 2 && (
           <div className="space-y-4">
             <div>
@@ -532,7 +515,6 @@ export default function TabPrompt({ companyId }: { companyId: string }) {
           </div>
         )}
 
-        {/* ── Paso 2b — Catálogo de productos/servicios ─────────────────────── */}
         {wizardStep === 3 && (
           <div className="space-y-4">
             <div>
@@ -565,7 +547,6 @@ export default function TabPrompt({ companyId }: { companyId: string }) {
                     )}
                   </div>
 
-                  {/* Título del menú */}
                   <div className="space-y-1.5">
                     <Label>
                       {wizard.objective === 'faq'     ? 'Nombre del tema' :
@@ -581,7 +562,6 @@ export default function TabPrompt({ companyId }: { companyId: string }) {
                     />
                   </div>
 
-                  {/* Beneficio / descripción */}
                   <div className="space-y-1.5">
                     <Label>
                       Descripción breve
@@ -594,7 +574,6 @@ export default function TabPrompt({ companyId }: { companyId: string }) {
                     />
                   </div>
 
-                  {/* Precio: tipo + valor */}
                   <div className="space-y-2">
                     <Label>Precio</Label>
                     <div className="grid grid-cols-3 gap-2">
@@ -632,7 +611,6 @@ export default function TabPrompt({ companyId }: { companyId: string }) {
                     )}
                   </div>
 
-                  {/* Siguiente paso */}
                   <div className="space-y-1.5">
                     <Label>Siguiente paso del cliente</Label>
                     <Input
@@ -652,7 +630,6 @@ export default function TabPrompt({ companyId }: { companyId: string }) {
               </button>
             </div>
 
-            {/* Preview del menú de WhatsApp */}
             {wizard.catalogItems.some(i => i.title.trim()) && (
               <div className="rounded-xl bg-[#0b1f0e] p-4 space-y-2">
                 <p className="text-xs text-green-400 font-medium">Vista previa — menú en WhatsApp</p>
@@ -668,8 +645,6 @@ export default function TabPrompt({ companyId }: { companyId: string }) {
                 className="flex-1"
                 disabled={!wizard.catalogItems.some(i => i.title.trim())}
                 onClick={() => {
-                  // Siempre regenera el mensaje de bienvenida al avanzar al paso 4
-                  // para que refleje el catálogo actual (puede haber cambiado)
                   setWizard(w => ({ ...w, welcomeMessage: generateMenuText(w) }))
                   setWizardStep(4)
                 }}
@@ -680,7 +655,6 @@ export default function TabPrompt({ companyId }: { companyId: string }) {
           </div>
         )}
 
-        {/* ── Paso 3 — Personalidad ──────────────────────────────────────────── */}
         {wizardStep === 4 && (
           <div className="space-y-4">
             <div>
@@ -748,7 +722,6 @@ export default function TabPrompt({ companyId }: { companyId: string }) {
                 />
               </div>
 
-              {/* Advanced */}
               <button
                 onClick={() => setShowAdvanced(v => !v)}
                 className="text-xs text-muted-foreground hover:text-foreground transition-colors flex items-center gap-1"
@@ -812,14 +785,15 @@ export default function TabPrompt({ companyId }: { companyId: string }) {
     )
   }
 
-  // ─── Vista principal (después de configurar) ──────────────────────────────
+  // ─── Vista principal ────────────────────────────────────────────────────────
 
   const activeKnowledge = knowledgeList.find(k => k.active)
+  const inactiveKnowledge = knowledgeList.filter(k => !k.active)
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-8 max-w-3xl">
 
-      {/* Header */}
+      {/* ── Header ───────────────────────────────────────────────────────────── */}
       <div className="flex items-start justify-between">
         <div>
           <h2 className="text-lg font-medium">Asistente IA</h2>
@@ -832,7 +806,7 @@ export default function TabPrompt({ companyId }: { companyId: string }) {
         </Button>
       </div>
 
-      {/* Empty state */}
+      {/* ── Empty state ────────────────────────────────────────────────────── */}
       {!hasConfig && knowledgeList.length === 0 && (
         <Card className="p-10 text-center space-y-4">
           <p className="text-4xl">🤖</p>
@@ -848,94 +822,190 @@ export default function TabPrompt({ companyId }: { companyId: string }) {
         </Card>
       )}
 
-      {/* Bot personality summary */}
       {hasConfig && (
-        <div className="space-y-3">
-          <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Personalidad del bot</p>
-          <Card className="p-5">
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-              {[
-                { label: 'Nombre', value: config.bot_name || '—' },
-                { label: 'Asesor', value: config.advisor_phone ? `+${config.advisor_phone}` : 'Sin transferencia' },
-                { label: 'Respuestas', value: STYLE_OPTIONS.find(s => s.value === config.style)?.label || '—' },
-                { label: 'Creatividad', value: CREATIVITY_OPTIONS.find(c => c.value === config.creativity)?.label || '—' },
-              ].map(({ label, value }) => (
-                <div key={label}>
-                  <p className="text-xs text-muted-foreground">{label}</p>
-                  <p className="text-sm font-medium mt-0.5 capitalize">{value}</p>
-                </div>
-              ))}
-            </div>
-            {config.welcome_message && (
-              <div className="mt-3 pt-3 border-t border-border">
-                <p className="text-xs text-muted-foreground">Mensaje de bienvenida</p>
-                <p className="text-sm mt-0.5 line-clamp-2">{config.welcome_message}</p>
+        <>
+          {/* ── SECCIÓN 1: Objetivo activo (lo más importante, arriba) ────────── */}
+          <div className="space-y-3">
+            {/* Cabecera con contexto */}
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+                  Objetivo activo
+                </p>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  Es el tema que domina tu bot ahora mismo — lo que sabe responder.
+                </p>
               </div>
-            )}
-          </Card>
-        </div>
-      )}
+            </div>
 
-      <Separator />
-
-      {/* Objectives list */}
-      {knowledgeList.length > 0 && (
-        <div className="space-y-3">
-          <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
-            Objetivos configurados
-          </p>
-          <p className="text-xs text-muted-foreground -mt-1">
-            Solo uno puede estar activo a la vez. El bot cambia de contenido al instante.
-          </p>
-
-          {knowledgeList.map(k => (
-            <Card key={k.id} className={`p-4 transition-all ${k.active ? 'ring-1 ring-green-400 bg-green-50/30' : ''}`}>
-              {editingKnowledge?.id === k.id ? (
-                <div className="space-y-3">
-                  <Input
-                    value={editingKnowledge.name}
-                    onChange={e => setEditingKnowledge({ ...editingKnowledge, name: e.target.value })}
-                  />
-                  <Textarea
-                    value={editingKnowledge.content}
-                    onChange={e => setEditingKnowledge({ ...editingKnowledge, content: e.target.value })}
-                    className="min-h-[200px] font-mono text-xs"
-                  />
-                  <div className="flex gap-2">
-                    <Button variant="outline" size="sm" className="flex-1" onClick={() => setEditingKnowledge(null)}>Cancelar</Button>
-                    <Button size="sm" className="flex-1" disabled={saving} onClick={handleSaveEditKnowledge}>
-                      {saving ? 'Guardando...' : 'Guardar'}
-                    </Button>
-                  </div>
-                </div>
-              ) : (
-                <div className="flex items-start justify-between gap-4">
-                  <div className="flex-1 space-y-1">
-                    <div className="flex items-center gap-2">
-                      <span className="text-sm font-medium">{k.name}</span>
-                      {k.active && <Badge className="bg-green-100 text-green-700 border-green-200 text-xs">● Activo ahora</Badge>}
+            {/* Card del objetivo activo — protagonista visual */}
+            {activeKnowledge ? (
+              <Card className="p-5 border-2 border-foreground bg-foreground/[0.02]">
+                {editingKnowledge?.id === activeKnowledge.id ? (
+                  <div className="space-y-3">
+                    <Input
+                      value={editingKnowledge.name}
+                      onChange={e => setEditingKnowledge({ ...editingKnowledge, name: e.target.value })}
+                    />
+                    <Textarea
+                      value={editingKnowledge.content}
+                      onChange={e => setEditingKnowledge({ ...editingKnowledge, content: e.target.value })}
+                      className="min-h-[200px] font-mono text-xs"
+                    />
+                    <div className="flex gap-2">
+                      <Button variant="outline" size="sm" className="flex-1" onClick={() => setEditingKnowledge(null)}>Cancelar</Button>
+                      <Button size="sm" className="flex-1" disabled={saving} onClick={handleSaveEditKnowledge}>
+                        {saving ? 'Guardando...' : 'Guardar'}
+                      </Button>
                     </div>
-                    <p className="text-xs text-muted-foreground line-clamp-2">{k.content}</p>
                   </div>
-                  <div className="flex items-center gap-1 shrink-0">
-                    {!k.active && (
-                      <Button variant="outline" size="sm" onClick={() => handleActivate(k.id)}>Activar</Button>
-                    )}
-                    <Button variant="ghost" size="sm" onClick={() => setEditingKnowledge(k)}>Editar</Button>
-                    {confirmDelete === k.id ? (
-                      <div className="flex gap-1">
-                        <Button variant="ghost" size="sm" onClick={() => setConfirmDelete(null)}>No</Button>
-                        <Button variant="ghost" size="sm" className="text-destructive" onClick={() => handleDelete(k.id)}>Sí</Button>
+                ) : (
+                  <div className="space-y-3">
+                    <div className="flex items-start justify-between gap-4">
+                      <div className="space-y-1">
+                        <div className="flex items-center gap-2">
+                          <span className="inline-block w-2 h-2 rounded-full bg-green-500 shrink-0" />
+                          <span className="text-sm font-semibold">{activeKnowledge.name}</span>
+                          <Badge className="bg-green-100 text-green-700 border-green-200 text-xs">Activo ahora</Badge>
+                        </div>
+                        <p className="text-xs text-muted-foreground line-clamp-2 pl-4">
+                          {activeKnowledge.content}
+                        </p>
                       </div>
-                    ) : (
-                      <Button variant="ghost" size="sm" className="text-destructive" onClick={() => setConfirmDelete(k.id)}>Eliminar</Button>
-                    )}
+                      <div className="flex items-center gap-1 shrink-0">
+                        <Button variant="ghost" size="sm" onClick={() => setEditingKnowledge(activeKnowledge)}>Editar</Button>
+                        {confirmDelete === activeKnowledge.id ? (
+                          <div className="flex gap-1">
+                            <Button variant="ghost" size="sm" onClick={() => setConfirmDelete(null)}>No</Button>
+                            <Button variant="ghost" size="sm" className="text-destructive" onClick={() => handleDelete(activeKnowledge.id)}>Sí</Button>
+                          </div>
+                        ) : (
+                          <Button variant="ghost" size="sm" className="text-destructive" onClick={() => setConfirmDelete(activeKnowledge.id)}>Eliminar</Button>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Conexión visual hacia la personalidad */}
+                    <div className="pt-2 border-t border-border/60">
+                      <p className="text-xs text-muted-foreground">
+                        🤖 <span className="font-medium text-foreground">{config.bot_name || 'Tu bot'}</span> usa este objetivo para saber qué responder — con tono <span className="font-medium text-foreground">{TONES.find(t => t.id === config.style)?.label ?? TONES.find(t => t.id === 'friendly')?.label}</span> y respuestas <span className="font-medium text-foreground lowercase">{STYLE_OPTIONS.find(s => s.value === config.style)?.label ?? 'medias'}</span>.
+                      </p>
+                    </div>
                   </div>
+                )}
+              </Card>
+            ) : (
+              <Card className="p-5 border border-dashed text-center">
+                <p className="text-sm text-muted-foreground">No hay ningún objetivo activo.</p>
+                <p className="text-xs text-muted-foreground mt-1">Activa uno de los objetivos de abajo para que el bot sepa qué responder.</p>
+              </Card>
+            )}
+          </div>
+
+          {/* ── SECCIÓN 2: Personalidad — secundaria, colapsable visualmente ─── */}
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+                  Personalidad del bot
+                </p>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  Así habla tu bot — aplica a todos los objetivos por igual.
+                </p>
+              </div>
+            </div>
+
+            <Card className="p-4 bg-muted/30">
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                {[
+                  { label: 'Nombre', value: config.bot_name || '—' },
+                  { label: 'Asesor', value: config.advisor_phone ? `+${config.advisor_phone}` : 'Sin transferencia' },
+                  { label: 'Respuestas', value: STYLE_OPTIONS.find(s => s.value === config.style)?.label || '—' },
+                  { label: 'Creatividad', value: CREATIVITY_OPTIONS.find(c => c.value === config.creativity)?.label || '—' },
+                ].map(({ label, value }) => (
+                  <div key={label}>
+                    <p className="text-xs text-muted-foreground">{label}</p>
+                    <p className="text-sm font-medium mt-0.5 capitalize">{value}</p>
+                  </div>
+                ))}
+              </div>
+              {config.welcome_message && (
+                <div className="mt-3 pt-3 border-t border-border/60">
+                  <p className="text-xs text-muted-foreground">Mensaje de bienvenida</p>
+                  <p className="text-sm mt-0.5 line-clamp-2 text-muted-foreground">{config.welcome_message}</p>
                 </div>
               )}
             </Card>
-          ))}
-        </div>
+          </div>
+
+          <Separator />
+
+          {/* ── SECCIÓN 3: Otros objetivos disponibles ──────────────────────── */}
+          {inactiveKnowledge.length > 0 && (
+            <div className="space-y-3">
+              <div>
+                <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+                  Otros objetivos disponibles
+                </p>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  Puedes cambiar el foco del bot en cualquier momento — solo activa uno.
+                </p>
+              </div>
+
+              <div className="space-y-2">
+                {inactiveKnowledge.map(k => (
+                  <Card key={k.id} className="p-4 opacity-70 hover:opacity-100 transition-opacity">
+                    {editingKnowledge?.id === k.id ? (
+                      <div className="space-y-3">
+                        <Input
+                          value={editingKnowledge.name}
+                          onChange={e => setEditingKnowledge({ ...editingKnowledge, name: e.target.value })}
+                        />
+                        <Textarea
+                          value={editingKnowledge.content}
+                          onChange={e => setEditingKnowledge({ ...editingKnowledge, content: e.target.value })}
+                          className="min-h-[200px] font-mono text-xs"
+                        />
+                        <div className="flex gap-2">
+                          <Button variant="outline" size="sm" className="flex-1" onClick={() => setEditingKnowledge(null)}>Cancelar</Button>
+                          <Button size="sm" className="flex-1" disabled={saving} onClick={handleSaveEditKnowledge}>
+                            {saving ? 'Guardando...' : 'Guardar'}
+                          </Button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="flex items-start justify-between gap-4">
+                        <div className="flex-1 space-y-1">
+                          <p className="text-sm font-medium">{k.name}</p>
+                          <p className="text-xs text-muted-foreground line-clamp-2">{k.content}</p>
+                        </div>
+                        <div className="flex items-center gap-1 shrink-0">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => handleActivate(k.id)}
+                            className="text-xs"
+                          >
+                            Activar
+                          </Button>
+                          <Button variant="ghost" size="sm" onClick={() => setEditingKnowledge(k)}>Editar</Button>
+                          {confirmDelete === k.id ? (
+                            <div className="flex gap-1">
+                              <Button variant="ghost" size="sm" onClick={() => setConfirmDelete(null)}>No</Button>
+                              <Button variant="ghost" size="sm" className="text-destructive" onClick={() => handleDelete(k.id)}>Sí</Button>
+                            </div>
+                          ) : (
+                            <Button variant="ghost" size="sm" className="text-destructive" onClick={() => setConfirmDelete(k.id)}>Eliminar</Button>
+                          )}
+                        </div>
+                      </div>
+                    )}
+                  </Card>
+                ))}
+              </div>
+            </div>
+          )}
+        </>
       )}
     </div>
   )
