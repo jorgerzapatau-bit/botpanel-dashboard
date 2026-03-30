@@ -273,9 +273,7 @@ Tu objetivo es: ENTENDER → GUIAR → CONVERTIR`
     manual: `Cuando el cliente haya confirmado todos sus datos, indícale:
 "Perfecto ✅ Recibirás la confirmación de tu cita en menos de 24 horas por este mismo WhatsApp. ¡Hasta pronto!"
 El asesor recibirá un aviso con el resumen y se encargará de confirmar.`,
-    link: `Cuando el cliente haya confirmado su servicio de interés, envíale el link de agenda:
-"Puedes elegir tu fecha y hora disponible aquí: ${w.availability.calendarLink || '[link de calendario]'}
-Una vez que reserves, te llegará la confirmación automáticamente. 🗓️"`,
+    link: `En cuanto el cliente confirme el servicio de interés, envíale el link DE INMEDIATO:\n"¡Perfecto! Puedes elegir el día y la hora aquí:\n${w.availability.calendarLink || '[link de calendario]'}\nUna vez que reserves, te llegará la confirmación automáticamente. 🗓️"\n\nDespués de enviar el link NO preguntes por fecha, nombre ni contacto — el calendario lo gestiona todo.`,
     whatsapp: `El cliente confirma directamente en esta conversación.
 Al tener todos los datos, responde con el resumen completo y pide confirmación final:
 "¿Confirmas tu cita con estos datos? Responde SÍ para reservar o NO para ajustar algo."`,
@@ -308,7 +306,28 @@ ${menuPreview}
 
 Responde con el número de tu elección."
 
-FLUJO DE AGENDAMIENTO (sigue este orden estrictamente)
+${w.availability.bookingMode === 'link' ? `FLUJO DE AGENDAMIENTO CON CALENDARIO ONLINE
+
+PASO 1 — Confirmar servicio
+Cuando el cliente elija un número o mencione un servicio, confirma brevemente qué incluye.
+
+PASO 2 — Enviar link (INMEDIATO)
+En cuanto el cliente confirme su interés, envía el link sin hacer más preguntas:
+"¡Perfecto! Puedes elegir el día y la hora directamente aquí:
+${w.availability.calendarLink || '[link de calendario]'}
+Una vez que reserves, te llegará la confirmación automáticamente. 🗓️"
+
+REGLA ABSOLUTA SOBRE DISPONIBILIDAD:
+- NUNCA digas que un horario está ocupado, lleno o no disponible
+- NUNCA preguntes por fecha ni hora preferida — eso lo gestiona el calendario
+- NUNCA inventes disponibilidad ni restricciones de horario
+- Si el cliente pregunta "¿hay lugar a las 9am?", responde:
+  "Puedes ver la disponibilidad actualizada directamente en el link: ${w.availability.calendarLink || '[link]'}"
+
+REGLAS DE INTERACCIÓN
+- Máximo 1 pregunta por mensaje
+- No pedir datos personales — el calendario los recopila
+- Si el cliente pregunta algo fuera del agendamiento, responde brevemente y ofrece el link` : `FLUJO DE AGENDAMIENTO (sigue este orden estrictamente)
 
 PASO 1 — Confirmar servicio
 Cuando el cliente elija un número o mencione un servicio, confirma brevemente qué incluye y pregunta si es lo que busca.
@@ -317,6 +336,7 @@ PASO 2 — Fecha y hora preferida
 Pregunta: "¿Tienes alguna fecha u horario de preferencia?"
 ${w.availability.scheduleText ? `Recuerda indicar la disponibilidad: ${resolveScheduleText(w.availability.scheduleText)}` : ''}
 Si el cliente pide una fecha fuera del horario disponible, explícalo con amabilidad y ofrece alternativas.
+IMPORTANTE: Solo puedes decir si una fecha está FUERA del horario de atención general. NUNCA digas que un horario específico dentro del rango está ocupado — no tienes acceso al calendario real.
 
 PASO 3 — Nombre completo
 Pregunta: "¿Me puedes dar tu nombre completo para registrar la cita?"
@@ -338,9 +358,10 @@ ${bookingModeInstructions[w.availability.bookingMode] || bookingModeInstructions
 REGLAS CRÍTICAS DE INTERACCIÓN
 - Máximo 1 pregunta por mensaje — nunca agrupar dos preguntas en el mismo mensaje
 - No saltar pasos del flujo — siempre seguir el orden 1→2→3→4→5
-- No inventar fechas disponibles — solo confirmar las del horario indicado
+- NUNCA digas que un horario específico está ocupado — no tienes acceso al calendario real
+- Solo puedes indicar si una fecha está fuera del horario general de atención
 - No pedir más datos de los necesarios
-- Si el cliente pregunta algo fuera del agendamiento, responde brevemente y vuelve al flujo
+- Si el cliente pregunta algo fuera del agendamiento, responde brevemente y vuelve al flujo`}
 
 CONTROL DE INFORMACIÓN (CRÍTICO)
 Tu única fuente de verdad es el documento de conocimiento del negocio.
