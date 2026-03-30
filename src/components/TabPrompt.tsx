@@ -193,6 +193,17 @@ function generateMenuText(w: WizardData): string {
 
 // ─── Generador de personalidad mejorado para 'appoint' ────────────────────────
 
+// Convierte el formato interno "DAYS:Lun,Mar|FROM:09:00|TO:18:00" a texto legible
+function resolveScheduleText(raw: string): string {
+  if (!raw.startsWith('DAYS:')) return raw
+  const parts: Record<string, string> = {}
+  raw.split('|').forEach(p => { const [k, v] = p.split(':'); parts[k] = v })
+  const days = parts['DAYS'] || ''
+  const from = (parts['FROM'] || '09:00').replace(':', 'h')
+  const to   = (parts['TO']   || '18:00').replace(':', 'h')
+  return `${days} · ${from}–${to}`
+}
+
 function generatePersonalityPrompt(w: WizardData): string {
   const toneMap: Record<string, string> = {
     formal:   'profesional, respetuoso y directo',
@@ -304,7 +315,7 @@ Cuando el cliente elija un número o mencione un servicio, confirma brevemente q
 
 PASO 2 — Fecha y hora preferida
 Pregunta: "¿Tienes alguna fecha u horario de preferencia?"
-${w.availability.scheduleText ? `Recuerda indicar la disponibilidad: ${w.availability.scheduleText}` : ''}
+${w.availability.scheduleText ? `Recuerda indicar la disponibilidad: ${resolveScheduleText(w.availability.scheduleText)}` : ''}
 Si el cliente pide una fecha fuera del horario disponible, explícalo con amabilidad y ofrece alternativas.
 
 PASO 3 — Nombre completo
@@ -517,7 +528,7 @@ Ubicación:
 =====================================
 
 Horario de atención:
-${w.availability.scheduleText || '[Ej: Lunes a viernes 9am–6pm, Sábados 9am–2pm]'}
+${resolveScheduleText(w.availability.scheduleText) || '[Ej: Lunes a viernes 9am–6pm, Sábados 9am–2pm]'}
 
 Modo de agendamiento:
 ${bookingModeLabel[w.availability.bookingMode] || bookingModeLabel['manual']}
@@ -772,124 +783,263 @@ export default function TabPrompt({ companyId }: { companyId: string }) {
         )}
 
         {/* ── PASO 2: Datos del negocio — con bloque extra si es appoint ──── */}
-        {wizardStep === 2 && (
-          <div className="space-y-4">
-            <div>
-              <h2 className="text-lg font-semibold">Datos de tu negocio</h2>
-              <p className="text-sm text-muted-foreground mt-1">Información general que aplica a todo tu negocio.</p>
-            </div>
-            <Card className="p-5 space-y-4">
-              <div className="space-y-1.5">
-                <Label>¿Cómo se llama tu negocio? *</Label>
-                <Input
-                  placeholder="Ej. NutriSport Pro, Clínica Bienestar, Academia Online..."
-                  value={wizard.businessName}
-                  onChange={e => setWizard(w => ({ ...w, businessName: e.target.value }))}
-                />
-              </div>
-              <div className="space-y-1.5">
-                <Label>¿Qué tipo de negocio es? *</Label>
-                <Input
-                  placeholder="Ej. Clínica dental / Consultorio / Estudio de yoga..."
-                  value={wizard.businessType}
-                  onChange={e => setWizard(w => ({ ...w, businessType: e.target.value }))}
-                />
-              </div>
-            </Card>
+        {wizardStep === 2 && (() => {
+          // Días de la semana — estado local simulado con wizard.availability.scheduleText
+          // Usamos un formato estructurado interno: días seleccionados + hora inicio + hora fin
+          // Para compatibilidad con el campo scheduleText existente, construimos el texto al cambiar
+          const DAYS = [
+            { id: 'Lun', label: 'Lun' }, { id: 'Mar', label: 'Mar' }, { id: 'Mié', label: 'Mié' },
+            { id: 'Jue', label: 'Jue' }, { id: 'Vie', label: 'Vie' },
+            { id: 'Sáb', label: 'Sáb' }, { id: 'Dom', label: 'Dom' },
+          ]
 
-            {/* ── Bloque de disponibilidad — SOLO para appoint ──────────────── */}
-            {wizard.objective === 'appoint' && (
-              <div className="space-y-3">
+          // Parsear days/hours desde el campo scheduleText si ya fue llenado con el nuevo formato
+          // Formato interno: "DAYS:Lun,Mar,Mié|FROM:09:00|TO:18:00"
+          const parseStructured = (text: string) => {
+            if (!text.startsWith('DAYS:')) return null
+            const parts: Record<string, string> = {}
+            text.split('|').forEach(p => { const [k, v] = p.split(':'); parts[k] = v })
+            return {
+              days: parts['DAYS'] ? parts['DAYS'].split(',') : [],
+              from: parts['FROM'] || '09:00',
+              to: parts['TO'] || '18:00',
+            }
+          }
+
+          const structured = parseStructured(wizard.availability.scheduleText)
+          const selectedDays: string[] = structured?.days ?? ['Lun', 'Mar', 'Mié', 'Jue', 'Vie']
+          const timeFrom: string = structured?.from ?? '09:00'
+          const timeTo: string = structured?.to ?? '18:00'
+
+          const buildScheduleText = (days: string[], from: string, to: string) =>
+            `DAYS:${days.join(',')}|FROM:${from}|TO:${to}`
+
+          const humanSchedule = (days: string[], from: string, to: string) => {
+            if (days.length === 0) return ''
+            return `${days.join(', ')} · ${from.replace(':', 'h')}–${to.replace(':', 'h')}`
+          }
+
+          const toggleDay = (day: string) => {
+            const next = selectedDays.includes(day)
+              ? selectedDays.filter(d => d !== day)
+              : [...selectedDays, day]
+            updateAvailability('scheduleText', buildScheduleText(next, timeFrom, timeTo))
+          }
+
+          const BOOKING_MODE_WITH_META = [
+            {
+              value: 'manual',
+              label: 'El asesor confirma',
+              desc: 'Ideal si no tienes calendario online. El bot guarda los datos y te avisa.',
+              tag: { text: 'Recomendado', cls: 'bg-green-100 text-green-700' },
+            },
+            {
+              value: 'link',
+              label: 'Link de calendario',
+              desc: 'Usa Calendly, Cal.com, etc. El cliente elige su horario solo.',
+              tag: { text: 'Automático', cls: 'bg-blue-100 text-blue-700' },
+            },
+            {
+              value: 'whatsapp',
+              label: 'Solo por WhatsApp',
+              desc: 'Tú y el cliente acuerdan fecha escribiéndose directamente.',
+              tag: null,
+            },
+          ]
+
+          const isStep2Valid =
+            wizard.businessName.trim() &&
+            wizard.businessType.trim() &&
+            !(wizard.objective === 'appoint' && wizard.availability.bookingMode === 'link' && !wizard.availability.calendarLink.trim())
+
+          return (
+            <div className="space-y-5">
+
+              {/* ── Mejora 5: Separación visual con numeración de secciones ── */}
+              <div className="flex items-center gap-3 pb-1">
+                <div className="w-6 h-6 rounded-full bg-foreground/10 flex items-center justify-center text-xs font-semibold text-foreground shrink-0">1</div>
                 <div>
-                  <p className="text-sm font-medium">Disponibilidad y agenda</p>
-                  <p className="text-xs text-muted-foreground mt-0.5">El bot usará esta info para indicar cuándo puedes atender.</p>
+                  <p className="text-base font-semibold leading-tight">Datos del negocio</p>
+                  <p className="text-xs text-muted-foreground mt-0.5">Información general que aplica a todo tu negocio.</p>
                 </div>
-
-                <Card className="p-5 space-y-4">
-                  <div className="space-y-1.5">
-                    <Label>Horario de atención</Label>
-                    <Input
-                      placeholder="Ej. Lunes a viernes 9am–6pm, Sábados 9am–2pm"
-                      value={wizard.availability.scheduleText}
-                      onChange={e => updateAvailability('scheduleText', e.target.value)}
-                    />
-                    <p className="text-xs text-muted-foreground">El bot repetirá este texto cuando el cliente pregunte por disponibilidad.</p>
-                  </div>
-
-                  <div className="space-y-2">
-                    <Label>¿Cómo se confirma la cita?</Label>
-                    <div className="space-y-2">
-                      {APPOINTMENT_BOOKING_MODE.map(mode => (
-                        <button
-                          key={mode.value}
-                          type="button"
-                          onClick={() => updateAvailability('bookingMode', mode.value)}
-                          className={`w-full flex items-start gap-3 p-3 rounded-xl border text-left transition-all ${
-                            wizard.availability.bookingMode === mode.value
-                              ? 'border-foreground bg-foreground/5 ring-1 ring-foreground'
-                              : 'border-border hover:border-foreground/40'
-                          }`}
-                        >
-                          <div className="flex-1">
-                            <p className="text-sm font-medium">{mode.label}</p>
-                            <p className="text-xs text-muted-foreground mt-0.5">{mode.desc}</p>
-                          </div>
-                          {wizard.availability.bookingMode === mode.value && (
-                            <span className="text-foreground text-sm shrink-0 mt-0.5">✓</span>
-                          )}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-
-                  {/* Link de calendario — solo si eligió 'link' */}
-                  {wizard.availability.bookingMode === 'link' && (
-                    <div className="space-y-1.5">
-                      <Label>Link de calendario *</Label>
-                      <Input
-                        placeholder="Ej. https://calendly.com/tu-usuario"
-                        value={wizard.availability.calendarLink}
-                        onChange={e => updateAvailability('calendarLink', e.target.value)}
-                      />
-                      <p className="text-xs text-muted-foreground">El bot enviará este link al cliente para que elija su horario.</p>
-                    </div>
-                  )}
-
-                  <div className="space-y-1.5">
-                    <Label>
-                      Máximo de citas por día
-                      <span className="text-muted-foreground font-normal text-xs ml-1">(opcional)</span>
-                    </Label>
-                    <Input
-                      placeholder="Ej. 8"
-                      type="number"
-                      min="1"
-                      value={wizard.availability.maxPerDay}
-                      onChange={e => updateAvailability('maxPerDay', e.target.value)}
-                    />
-                  </div>
-                </Card>
               </div>
-            )}
-            {/* ── Fin bloque appoint ────────────────────────────────────────── */}
 
-            <div className="flex gap-3">
-              <Button variant="outline" className="flex-1" onClick={() => setWizardStep(1)}>← Atrás</Button>
-              <Button
-                className="flex-1"
-                disabled={
-                  !wizard.businessName.trim() ||
-                  !wizard.businessType.trim() ||
-                  // Si es appoint y eligió link, el link es obligatorio
-                  (wizard.objective === 'appoint' && wizard.availability.bookingMode === 'link' && !wizard.availability.calendarLink.trim())
-                }
-                onClick={() => setWizardStep(3)}
-              >
-                Continuar →
-              </Button>
+              <Card className="p-5 space-y-4">
+                <div className="space-y-1.5">
+                  <Label>¿Cómo se llama tu negocio? *</Label>
+                  <Input
+                    placeholder="Ej. NutriSport Pro, Clínica Bienestar, Academia Online..."
+                    value={wizard.businessName}
+                    onChange={e => setWizard(w => ({ ...w, businessName: e.target.value }))}
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label>¿Qué tipo de negocio es? *</Label>
+                  <Input
+                    placeholder="Ej. Clínica dental / Consultorio / Estudio de yoga..."
+                    value={wizard.businessType}
+                    onChange={e => setWizard(w => ({ ...w, businessType: e.target.value }))}
+                  />
+                </div>
+              </Card>
+
+              {/* ── Bloque de disponibilidad — SOLO para appoint ─────────── */}
+              {wizard.objective === 'appoint' && (
+                <div className="space-y-4">
+                  <div className="flex items-center gap-3 pt-1 pb-0.5 border-t border-border/50 mt-2">
+                    <div className="w-6 h-6 rounded-full border-2 border-foreground flex items-center justify-center text-xs font-semibold text-foreground shrink-0">2</div>
+                    <div>
+                      <p className="text-base font-semibold leading-tight">Disponibilidad y agenda</p>
+                      <p className="text-xs text-muted-foreground mt-0.5">El bot usará esta info para indicar cuándo puedes atender.</p>
+                    </div>
+                    <span className="ml-auto text-xs text-muted-foreground">En curso</span>
+                  </div>
+
+                  <Card className="p-5 space-y-5">
+
+                    {/* ── Mejora 1: Días con pills + horas estructuradas ── */}
+                    <div className="space-y-3">
+                      <Label>Días disponibles</Label>
+                      <div className="flex flex-wrap gap-2">
+                        {DAYS.map(d => (
+                          <button
+                            key={d.id}
+                            type="button"
+                            onClick={() => toggleDay(d.id)}
+                            className={`px-3 py-1.5 rounded-full border text-xs font-medium transition-all ${
+                              selectedDays.includes(d.id)
+                                ? 'border-foreground bg-foreground text-background'
+                                : 'border-border text-muted-foreground hover:border-foreground/40'
+                            }`}
+                          >
+                            {d.label}
+                          </button>
+                        ))}
+                      </div>
+                      <div className="grid grid-cols-2 gap-3">
+                        <div className="space-y-1.5">
+                          <Label className="text-xs">Hora inicio</Label>
+                          <Input
+                            type="time"
+                            value={timeFrom}
+                            onChange={e => updateAvailability('scheduleText', buildScheduleText(selectedDays, e.target.value, timeTo))}
+                          />
+                        </div>
+                        <div className="space-y-1.5">
+                          <Label className="text-xs">Hora fin</Label>
+                          <Input
+                            type="time"
+                            value={timeTo}
+                            onChange={e => updateAvailability('scheduleText', buildScheduleText(selectedDays, timeFrom, e.target.value))}
+                          />
+                        </div>
+                      </div>
+                      {selectedDays.length > 0 && (
+                        <p className="text-xs text-green-700 bg-green-50 rounded-lg px-3 py-2">
+                          ✓ El bot informará: <span className="font-medium">{humanSchedule(selectedDays, timeFrom, timeTo)}</span>
+                        </p>
+                      )}
+                    </div>
+
+                    {/* ── Mejora 2: Modo con tag recomendado y contexto ── */}
+                    <div className="space-y-2">
+                      <Label>¿Cómo se agenda la cita?</Label>
+                      <div className="space-y-2">
+                        {BOOKING_MODE_WITH_META.map(mode => (
+                          <button
+                            key={mode.value}
+                            type="button"
+                            onClick={() => updateAvailability('bookingMode', mode.value)}
+                            className={`w-full flex items-start gap-3 p-3 rounded-xl border text-left transition-all ${
+                              wizard.availability.bookingMode === mode.value
+                                ? 'border-foreground bg-foreground/5 ring-1 ring-foreground'
+                                : 'border-border hover:border-foreground/40'
+                            }`}
+                          >
+                            <div className="flex-1">
+                              <p className="text-sm font-medium flex items-center gap-2 flex-wrap">
+                                {mode.label}
+                                {mode.tag && (
+                                  <span className={`text-[10px] px-2 py-0.5 rounded-full font-semibold ${mode.tag.cls}`}>
+                                    {mode.tag.text}
+                                  </span>
+                                )}
+                              </p>
+                              <p className="text-xs text-muted-foreground mt-0.5">{mode.desc}</p>
+                            </div>
+                            {wizard.availability.bookingMode === mode.value && (
+                              <span className="text-foreground text-sm shrink-0 mt-0.5">✓</span>
+                            )}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Link de calendario — solo si eligió 'link' */}
+                    {wizard.availability.bookingMode === 'link' && (
+                      <div className="space-y-1.5">
+                        <Label>Link de calendario *</Label>
+                        <Input
+                          placeholder="Ej. https://calendly.com/tu-usuario"
+                          value={wizard.availability.calendarLink}
+                          onChange={e => updateAvailability('calendarLink', e.target.value)}
+                        />
+                        <p className="text-xs text-muted-foreground">El bot enviará este link al cliente para que elija su horario.</p>
+                      </div>
+                    )}
+
+                    {/* ── Mejora 3: Campo de citas con impacto explicado ── */}
+                    <div className="space-y-1.5">
+                      <Label>
+                        ¿Cuántas citas puedes atender por día?
+                        <span className="text-muted-foreground font-normal text-xs ml-1">(opcional)</span>
+                      </Label>
+                      <Input
+                        placeholder="Ej. 8 — o deja vacío si no hay límite"
+                        type="number"
+                        min="1"
+                        value={wizard.availability.maxPerDay}
+                        onChange={e => updateAvailability('maxPerDay', e.target.value)}
+                      />
+                      <p className="text-xs text-muted-foreground">
+                        El bot no agendará más de este número al día y avisará cuando no haya disponibilidad.
+                      </p>
+                    </div>
+                  </Card>
+                </div>
+              )}
+              {/* ── Fin bloque appoint ────────────────────────────────────── */}
+
+              {/* ── Mejora 4: Mini resumen antes de continuar ─────────────── */}
+              {wizard.businessName.trim() && (
+                <div className="rounded-xl border border-green-200 bg-green-50/60 px-4 py-3 space-y-1">
+                  <p className="text-xs font-semibold text-green-800">Resumen hasta aquí</p>
+                  <p className="text-xs text-green-700">
+                    <span className="font-medium">{wizard.businessType || 'Negocio'}</span>
+                    {' · '}{wizard.businessName}
+                    {wizard.objective === 'appoint' && selectedDays.length > 0 && (
+                      <> · {humanSchedule(selectedDays, timeFrom, timeTo)}</>
+                    )}
+                    {wizard.objective === 'appoint' && (
+                      <> · {BOOKING_MODE_WITH_META.find(m => m.value === wizard.availability.bookingMode)?.label}</>
+                    )}
+                  </p>
+                </div>
+              )}
+
+              <div className="flex gap-3">
+                <Button variant="outline" className="flex-1" onClick={() => setWizardStep(1)}>← Atrás</Button>
+                <Button
+                  className="flex-1"
+                  disabled={!isStep2Valid}
+                  onClick={() => setWizardStep(3)}
+                >
+                  {wizard.businessName.trim() ? 'Todo bien, continuar →' : 'Continuar →'}
+                </Button>
+              </div>
             </div>
-          </div>
-        )}
+          )
+        })()}
 
         {/* ── PASO 3: Catálogo — con campos extra si es appoint ──────────── */}
         {wizardStep === 3 && (
