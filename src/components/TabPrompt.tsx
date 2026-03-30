@@ -40,6 +40,29 @@ const CREATIVITY_OPTIONS = [
   { value: 'creativo',   label: 'Creativo',   desc: 'Respuestas variadas y expresivas',  temp: 1.0 },
 ]
 
+// ─── Opciones específicas para citas ───────────────────────────────────────────
+
+const APPOINTMENT_MODALITY = [
+  { value: 'presencial', label: 'Presencial', desc: 'En tu consultorio o local' },
+  { value: 'online',     label: 'Online',     desc: 'Videollamada o llamada' },
+  { value: 'domicilio',  label: 'A domicilio', desc: 'El profesional va al cliente' },
+]
+
+const APPOINTMENT_BOOKING_MODE = [
+  { value: 'manual',    label: 'El asesor confirma', desc: 'El bot recopila datos y avisa al asesor por WhatsApp' },
+  { value: 'link',      label: 'Link de calendario', desc: 'El bot envía un link para que el cliente elija su slot' },
+  { value: 'whatsapp',  label: 'Solo por WhatsApp',  desc: 'El cliente confirma directamente en la conversación' },
+]
+
+const APPOINTMENT_DURATION = [
+  { value: '30',  label: '30 min' },
+  { value: '45',  label: '45 min' },
+  { value: '60',  label: '1 hora' },
+  { value: '90',  label: '1.5 horas' },
+  { value: '120', label: '2 horas' },
+  { value: 'flex', label: 'Variable' },
+]
+
 // ─── Types ─────────────────────────────────────────────────────────────────────
 
 type PriceType = 'fixed' | 'from' | 'quote'
@@ -51,6 +74,18 @@ type CatalogItem = {
   priceType: PriceType
   priceValue: string
   nextStep: string
+  // Campos exclusivos para appoint:
+  duration?: string
+  modality?: string
+}
+
+// Configuración de disponibilidad — solo aplica cuando objective === 'appoint'
+type AvailabilityConfig = {
+  scheduleText: string      // Ej: "Lunes a viernes 9am–6pm"
+  bookingMode: string       // 'manual' | 'link' | 'whatsapp'
+  calendarLink: string      // URL opcional si bookingMode === 'link'
+  maxPerDay: string         // Número opcional de citas máx por día
+  requiresConfirmation: boolean
 }
 
 type WizardData = {
@@ -64,7 +99,17 @@ type WizardData = {
   welcomeMessage: string
   style: string
   creativity: string
+  // Solo para appoint:
+  availability: AvailabilityConfig
 }
+
+const emptyAvailability = (): AvailabilityConfig => ({
+  scheduleText: '',
+  bookingMode: 'manual',
+  calendarLink: '',
+  maxPerDay: '',
+  requiresConfirmation: true,
+})
 
 const newCatalogItem = (): CatalogItem => ({
   id: Math.random().toString(36).slice(2),
@@ -73,6 +118,8 @@ const newCatalogItem = (): CatalogItem => ({
   priceType: 'fixed',
   priceValue: '',
   nextStep: '',
+  duration: '60',
+  modality: 'presencial',
 })
 
 function formatPrice(item: CatalogItem): string {
@@ -95,6 +142,7 @@ const emptyWizard = (): WizardData => ({
   catalogItems: [newCatalogItem()],
   botName: '', tone: 'friendly', transferPhone: '', welcomeMessage: '',
   style: 'medio', creativity: 'balanceado',
+  availability: emptyAvailability(),
 })
 
 function getTitlePlaceholder(objective: string): string {
@@ -119,7 +167,7 @@ function getBenefitPlaceholder(objective: string): string {
 
 function getNextStepPlaceholder(objective: string): string {
   switch (objective) {
-    case 'appoint': return 'Ej. Escribir para confirmar fecha'
+    case 'appoint': return 'Ej. El asesor confirma la cita en menos de 24h'
     case 'sell':    return 'Ej. Clic en link de pago'
     case 'course':  return 'Ej. Inscribirse en el formulario'
     default:        return 'Ej. Contactar al asesor'
@@ -133,11 +181,17 @@ function generateMenuText(w: WizardData): string {
     .filter(i => i.title.trim())
     .map((item, idx) => {
       const price = formatPrice(item)
-      return `${idx + 1}️⃣ ${item.title}${price ? ` — ${price}` : ''}`
+      // Para citas añadimos duración si está disponible
+      const durationLabel = w.objective === 'appoint' && item.duration && item.duration !== 'flex'
+        ? ` (${APPOINTMENT_DURATION.find(d => d.value === item.duration)?.label || ''})`
+        : ''
+      return `${idx + 1}️⃣ ${item.title}${durationLabel}${price ? ` — ${price}` : ''}`
     })
     .join('\n')
   return `¡Hola! 👋 ¿En qué te puedo ayudar?\n\n${lines}\n\nResponde con el número de tu elección.`
 }
+
+// ─── Generador de personalidad mejorado para 'appoint' ────────────────────────
 
 function generatePersonalityPrompt(w: WizardData): string {
   const toneMap: Record<string, string> = {
@@ -145,15 +199,16 @@ function generatePersonalityPrompt(w: WizardData): string {
     friendly: 'amigable, cálido y cercano',
     casual:   'conversacional, empático y como un amigo de confianza',
   }
-  const objMap: Record<string, string> = {
-    sell:    'guiar al cliente hacia una compra. Detecta su necesidad y ofrece el producto adecuado.',
-    appoint: 'ayudar al cliente a agendar una cita o consulta. Pregunta disponibilidad y confirma.',
-    faq:     'responder las preguntas frecuentes del negocio con claridad y precisión.',
-    course:  'presentar los cursos o membresías disponibles y guiar hacia la inscripción.',
-    support: 'ayudar a clientes que ya compraron a resolver problemas o dudas post-venta.',
-  }
 
-  return `IDENTIDAD Y ROL
+  // Para objetivos distintos de appoint, lógica original sin cambios
+  if (w.objective !== 'appoint') {
+    const objMap: Record<string, string> = {
+      sell:    'guiar al cliente hacia una compra. Detecta su necesidad y ofrece el producto adecuado.',
+      faq:     'responder las preguntas frecuentes del negocio con claridad y precisión.',
+      course:  'presentar los cursos o membresías disponibles y guiar hacia la inscripción.',
+      support: 'ayudar a clientes que ya compraron a resolver problemas o dudas post-venta.',
+    }
+    return `IDENTIDAD Y ROL
 Eres ${w.botName || 'un asistente virtual'}, el asistente virtual de ${w.businessName || 'este negocio'}.
 Tu estilo de comunicación es: ${toneMap[w.tone] || 'amigable y profesional'}.
 
@@ -200,14 +255,104 @@ Cuando el usuario lo solicite o no puedas resolver su duda, transfiere con el as
 PRINCIPIO CLAVE
 Tu objetivo no es solo responder.
 Tu objetivo es: ENTENDER → GUIAR → CONVERTIR`
+  }
+
+  // ── Prompt especializado para AGENDAR CITAS ──────────────────────────────────
+  const bookingModeInstructions: Record<string, string> = {
+    manual: `Cuando el cliente haya confirmado todos sus datos, indícale:
+"Perfecto ✅ Recibirás la confirmación de tu cita en menos de 24 horas por este mismo WhatsApp. ¡Hasta pronto!"
+El asesor recibirá un aviso con el resumen y se encargará de confirmar.`,
+    link: `Cuando el cliente haya confirmado su servicio de interés, envíale el link de agenda:
+"Puedes elegir tu fecha y hora disponible aquí: ${w.availability.calendarLink || '[link de calendario]'}
+Una vez que reserves, te llegará la confirmación automáticamente. 🗓️"`,
+    whatsapp: `El cliente confirma directamente en esta conversación.
+Al tener todos los datos, responde con el resumen completo y pide confirmación final:
+"¿Confirmas tu cita con estos datos? Responde SÍ para reservar o NO para ajustar algo."`,
+  }
+
+  const menuPreview = w.catalogItems
+    .filter(i => i.title.trim())
+    .map((item, idx) => {
+      const price = formatPrice(item)
+      const dur = item.duration && item.duration !== 'flex'
+        ? ` (${APPOINTMENT_DURATION.find(d => d.value === item.duration)?.label || ''})`
+        : ''
+      return `${idx + 1}️⃣ ${item.title}${dur}${price ? ` — ${price}` : ''}`
+    })
+    .join('\n')
+
+  return `IDENTIDAD Y ROL
+Eres ${w.botName || 'un asistente virtual'}, el asistente de agenda de ${w.businessName || 'este negocio'}.
+Tu estilo de comunicación es: ${toneMap[w.tone] || 'amigable y profesional'}.
+
+TU OBJETIVO PRINCIPAL
+Ayudar al cliente a agendar una cita o consulta de forma clara, ordenada y sin fricción.
+Tu trabajo es recopilar la información necesaria paso a paso — UNA pregunta a la vez.
+
+MENÚ DE BIENVENIDA
+Al iniciar cualquier conversación SIEMPRE presenta el menú numerado:
+"¡Hola! 👋 ¿En qué te puedo ayudar?
+
+${menuPreview}
+
+Responde con el número de tu elección."
+
+FLUJO DE AGENDAMIENTO (sigue este orden estrictamente)
+
+PASO 1 — Confirmar servicio
+Cuando el cliente elija un número o mencione un servicio, confirma brevemente qué incluye y pregunta si es lo que busca.
+
+PASO 2 — Fecha y hora preferida
+Pregunta: "¿Tienes alguna fecha u horario de preferencia?"
+${w.availability.scheduleText ? `Recuerda indicar la disponibilidad: ${w.availability.scheduleText}` : ''}
+Si el cliente pide una fecha fuera del horario disponible, explícalo con amabilidad y ofrece alternativas.
+
+PASO 3 — Nombre completo
+Pregunta: "¿Me puedes dar tu nombre completo para registrar la cita?"
+
+PASO 4 — Datos de contacto
+Pregunta: "¿Un número de teléfono o correo donde podamos confirmarte la cita?"
+${!w.transferPhone ? 'Este paso es opcional, no insistas si el cliente prefiere no dar el dato.' : ''}
+
+PASO 5 — Resumen y cierre
+Repite todos los datos recopilados en un mensaje de confirmación:
+"Perfecto, aquí está el resumen de tu cita:
+📋 Servicio: [servicio elegido]
+📅 Fecha/hora: [fecha solicitada]
+👤 Nombre: [nombre]
+📱 Contacto: [dato de contacto]
+
+${bookingModeInstructions[w.availability.bookingMode] || bookingModeInstructions['manual']}
+
+REGLAS CRÍTICAS DE INTERACCIÓN
+- Máximo 1 pregunta por mensaje — nunca agrupar dos preguntas en el mismo mensaje
+- No saltar pasos del flujo — siempre seguir el orden 1→2→3→4→5
+- No inventar fechas disponibles — solo confirmar las del horario indicado
+- No pedir más datos de los necesarios
+- Si el cliente pregunta algo fuera del agendamiento, responde brevemente y vuelve al flujo
+
+CONTROL DE INFORMACIÓN (CRÍTICO)
+Tu única fuente de verdad es el documento de conocimiento del negocio.
+Si algo no está definido, responde EXACTAMENTE:
+"No tengo esa información en este momento. ¿Deseas que te transfiera con un asesor?"
+
+${w.transferPhone ? `TRANSFERENCIA A ASESOR HUMANO
+Si el cliente lo solicita o hay un problema que no puedes resolver, transfiere con el asesor.` : ''}
+
+PRINCIPIO CLAVE
+Tu objetivo es: ESCUCHAR → RECOPILAR → CONFIRMAR`
 }
+
+// ─── Generador de knowledge mejorado para 'appoint' ──────────────────────────
 
 function generateKnowledgeContent(w: WizardData): string {
   const objLabel = OBJECTIVES.find(o => o.id === w.objective)?.label || 'Asistente general'
   const validItems = w.catalogItems.filter(i => i.title.trim())
 
-  const catalogSection = validItems.length > 0
-    ? validItems.map((item, idx) => `OPCIÓN ${idx + 1}: ${item.title.toUpperCase()}
+  // Para objetivos distintos de appoint, lógica original sin cambios
+  if (w.objective !== 'appoint') {
+    const catalogSection = validItems.length > 0
+      ? validItems.map((item, idx) => `OPCIÓN ${idx + 1}: ${item.title.toUpperCase()}
 
 Nombre:
 ${item.title}
@@ -225,16 +370,16 @@ Siguiente paso del cliente:
 ${item.nextStep || '[No especificado]'}
 
 ---`).join('\n\n')
-    : `[Sin productos/servicios definidos]`
+      : `[Sin productos/servicios definidos]`
 
-  const menuPreview = validItems.length > 0
-    ? validItems.map((item, idx) => {
-        const price = formatPrice(item)
-        return `${idx + 1}️⃣ ${item.title}${price ? ` — ${price}` : ''}`
-      }).join('\n')
-    : '[Sin opciones definidas]'
+    const menuPreview = validItems.length > 0
+      ? validItems.map((item, idx) => {
+          const price = formatPrice(item)
+          return `${idx + 1}️⃣ ${item.title}${price ? ` — ${price}` : ''}`
+        }).join('\n')
+      : '[Sin opciones definidas]'
 
-  return `DOCUMENTO DE CONOCIMIENTO – ${(w.businessName || 'MI NEGOCIO').toUpperCase()}
+    return `DOCUMENTO DE CONOCIMIENTO – ${(w.businessName || 'MI NEGOCIO').toUpperCase()}
 
 PROPÓSITO
 Este documento es la ÚNICA fuente de verdad del negocio.
@@ -263,7 +408,7 @@ Horario de atención:
 ---
 
 =====================================
-2. CATÁLOGO DE ${w.objective === 'faq' ? 'TEMAS' : w.objective === 'appoint' ? 'SERVICIOS / CITAS' : 'PRODUCTOS / SERVICIOS'}
+2. CATÁLOGO DE ${w.objective === 'faq' ? 'TEMAS' : w.objective === 'course' ? 'CURSOS / MEMBRESÍAS' : 'PRODUCTOS / SERVICIOS'}
 =====================================
 
 MENÚ PRINCIPAL DEL BOT:
@@ -290,6 +435,144 @@ ${catalogSection}
 
 Si no existe información, responder EXACTAMENTE:
 "No tengo esa información en este momento. ¿Deseas que te transfiera con un asesor?"`
+  }
+
+  // ── Knowledge especializado para AGENDAR CITAS ───────────────────────────────
+  const bookingModeLabel: Record<string, string> = {
+    manual:   'El asesor confirma la cita manualmente por WhatsApp',
+    link:     `El cliente elige su slot en el link: ${w.availability.calendarLink || '[pendiente agregar link]'}`,
+    whatsapp: 'La cita se confirma directamente en la conversación de WhatsApp',
+  }
+
+  const servicesSection = validItems.length > 0
+    ? validItems.map((item, idx) => {
+        const durLabel = item.duration && item.duration !== 'flex'
+          ? APPOINTMENT_DURATION.find(d => d.value === item.duration)?.label || item.duration + ' min'
+          : 'Variable según caso'
+        const modalityLabel = APPOINTMENT_MODALITY.find(m => m.value === item.modality)?.label || item.modality || '[No especificado]'
+
+        return `SERVICIO ${idx + 1}: ${item.title.toUpperCase()}
+
+Nombre:
+${item.title}
+
+Descripción / qué incluye:
+${item.benefit || '[Sin descripción]'}
+
+Duración:
+${durLabel}
+
+Modalidad:
+${modalityLabel}
+
+Precio:
+${formatPrice(item) || '[No especificado]'}
+
+Instrucción de precio para el bot:
+${priceInstruction(item)}
+
+Confirmación / siguiente paso:
+${item.nextStep || 'El asesor confirmará la cita por WhatsApp en menos de 24 horas.'}
+
+---`
+      }).join('\n\n')
+    : '[Sin servicios definidos]'
+
+  const menuPreview = validItems.length > 0
+    ? validItems.map((item, idx) => {
+        const price = formatPrice(item)
+        const dur = item.duration && item.duration !== 'flex'
+          ? ` (${APPOINTMENT_DURATION.find(d => d.value === item.duration)?.label || ''})`
+          : ''
+        return `${idx + 1}️⃣ ${item.title}${dur}${price ? ` — ${price}` : ''}`
+      }).join('\n')
+    : '[Sin servicios definidos]'
+
+  return `DOCUMENTO DE CONOCIMIENTO – ${(w.businessName || 'MI NEGOCIO').toUpperCase()}
+MODO: AGENDAMIENTO DE CITAS
+
+PROPÓSITO
+Este documento es la ÚNICA fuente de verdad del negocio.
+Objetivo del bot: ${objLabel}
+
+Si algo no está aquí → No existe → No se puede responder.
+
+---
+
+=====================================
+1. INFORMACIÓN GENERAL
+=====================================
+
+Nombre del negocio:
+${w.businessName || '[Completa aquí]'}
+
+Tipo de negocio:
+${w.businessType || '[Ej: Clínica / Consultorio / Estudio / Academia]'}
+
+Ubicación:
+[Completa: Ciudad / Dirección / Online]
+
+=====================================
+2. DISPONIBILIDAD Y HORARIOS
+=====================================
+
+Horario de atención:
+${w.availability.scheduleText || '[Ej: Lunes a viernes 9am–6pm, Sábados 9am–2pm]'}
+
+Modo de agendamiento:
+${bookingModeLabel[w.availability.bookingMode] || bookingModeLabel['manual']}
+
+${w.availability.maxPerDay ? `Límite de citas por día:\n${w.availability.maxPerDay} citas máximo por día` : ''}
+
+Requiere confirmación del asesor:
+${w.availability.requiresConfirmation ? 'Sí — el asesor confirma antes de dar por agendada la cita' : 'No — la cita queda agendada al completar el flujo'}
+
+${w.availability.calendarLink ? `Link de calendario:\n${w.availability.calendarLink}` : ''}
+
+---
+
+=====================================
+3. CATÁLOGO DE SERVICIOS / CITAS
+=====================================
+
+MENÚ PRINCIPAL DEL BOT:
+${menuPreview}
+
+---
+
+${servicesSection}
+
+=====================================
+4. DATOS A RECOPILAR (EN ESTE ORDEN)
+=====================================
+
+El bot SIEMPRE debe recopilar los siguientes datos antes de confirmar una cita:
+
+1. Servicio de interés (del menú)
+2. Fecha y hora preferida
+3. Nombre completo del cliente
+4. Dato de contacto (teléfono o email)
+
+NO continuar al siguiente paso hasta obtener respuesta del anterior.
+
+=====================================
+5. RESTRICCIONES
+=====================================
+
+- No inventar fechas ni horarios disponibles
+- No confirmar citas fuera del horario indicado
+- No omitir ningún paso del flujo de recopilación
+- No estimar precios no definidos
+- No prometer resultados específicos
+
+---
+
+=====================================
+6. CONTROL DE DESCONOCIMIENTO
+=====================================
+
+Si no existe información, responder EXACTAMENTE:
+"No tengo esa información en este momento. ¿Deseas que te transfiera con un asesor?"`
 }
 
 // ─── Main component ────────────────────────────────────────────────────────────
@@ -308,12 +591,17 @@ export default function TabPrompt({ companyId }: { companyId: string }) {
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null)
   const [showAdvanced, setShowAdvanced] = useState(false)
 
+  // Total de pasos: 4 para todos los objetivos, igual que antes
   const TOTAL_STEPS = 4
   const stepLabel = (s: number) => {
     switch (s) {
       case 1: return '¿En qué se va a enfocar tu bot?'
-      case 2: return 'Datos de tu negocio'
-      case 3: return 'Tus productos o servicios'
+      case 2: return wizard.objective === 'appoint'
+        ? 'Datos de tu negocio y disponibilidad'
+        : 'Datos de tu negocio'
+      case 3: return wizard.objective === 'appoint'
+        ? 'Servicios o citas disponibles'
+        : 'Tus productos o servicios'
       case 4: return '¿Cómo va a hablar tu bot?'
     }
   }
@@ -341,6 +629,10 @@ export default function TabPrompt({ companyId }: { companyId: string }) {
 
   const removeCatalogItem = (id: string) => {
     setWizard(w => ({ ...w, catalogItems: w.catalogItems.filter(item => item.id !== id) }))
+  }
+
+  const updateAvailability = (field: keyof AvailabilityConfig, value: string | boolean) => {
+    setWizard(w => ({ ...w, availability: { ...w.availability, [field]: value } }))
   }
 
   const handleWizardSave = async () => {
@@ -444,6 +736,7 @@ export default function TabPrompt({ companyId }: { companyId: string }) {
           <p className="text-xs text-muted-foreground">{stepLabel(wizardStep)}</p>
         </div>
 
+        {/* ── PASO 1: Objetivo — sin cambios ──────────────────────────────── */}
         {wizardStep === 1 && (
           <div className="space-y-4">
             <div>
@@ -478,6 +771,7 @@ export default function TabPrompt({ companyId }: { companyId: string }) {
           </div>
         )}
 
+        {/* ── PASO 2: Datos del negocio — con bloque extra si es appoint ──── */}
         {wizardStep === 2 && (
           <div className="space-y-4">
             <div>
@@ -496,17 +790,99 @@ export default function TabPrompt({ companyId }: { companyId: string }) {
               <div className="space-y-1.5">
                 <Label>¿Qué tipo de negocio es? *</Label>
                 <Input
-                  placeholder="Ej. Tienda de suplementos / Clínica dental / Academia online..."
+                  placeholder="Ej. Clínica dental / Consultorio / Estudio de yoga..."
                   value={wizard.businessType}
                   onChange={e => setWizard(w => ({ ...w, businessType: e.target.value }))}
                 />
               </div>
             </Card>
+
+            {/* ── Bloque de disponibilidad — SOLO para appoint ──────────────── */}
+            {wizard.objective === 'appoint' && (
+              <div className="space-y-3">
+                <div>
+                  <p className="text-sm font-medium">Disponibilidad y agenda</p>
+                  <p className="text-xs text-muted-foreground mt-0.5">El bot usará esta info para indicar cuándo puedes atender.</p>
+                </div>
+
+                <Card className="p-5 space-y-4">
+                  <div className="space-y-1.5">
+                    <Label>Horario de atención</Label>
+                    <Input
+                      placeholder="Ej. Lunes a viernes 9am–6pm, Sábados 9am–2pm"
+                      value={wizard.availability.scheduleText}
+                      onChange={e => updateAvailability('scheduleText', e.target.value)}
+                    />
+                    <p className="text-xs text-muted-foreground">El bot repetirá este texto cuando el cliente pregunte por disponibilidad.</p>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label>¿Cómo se confirma la cita?</Label>
+                    <div className="space-y-2">
+                      {APPOINTMENT_BOOKING_MODE.map(mode => (
+                        <button
+                          key={mode.value}
+                          type="button"
+                          onClick={() => updateAvailability('bookingMode', mode.value)}
+                          className={`w-full flex items-start gap-3 p-3 rounded-xl border text-left transition-all ${
+                            wizard.availability.bookingMode === mode.value
+                              ? 'border-foreground bg-foreground/5 ring-1 ring-foreground'
+                              : 'border-border hover:border-foreground/40'
+                          }`}
+                        >
+                          <div className="flex-1">
+                            <p className="text-sm font-medium">{mode.label}</p>
+                            <p className="text-xs text-muted-foreground mt-0.5">{mode.desc}</p>
+                          </div>
+                          {wizard.availability.bookingMode === mode.value && (
+                            <span className="text-foreground text-sm shrink-0 mt-0.5">✓</span>
+                          )}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Link de calendario — solo si eligió 'link' */}
+                  {wizard.availability.bookingMode === 'link' && (
+                    <div className="space-y-1.5">
+                      <Label>Link de calendario *</Label>
+                      <Input
+                        placeholder="Ej. https://calendly.com/tu-usuario"
+                        value={wizard.availability.calendarLink}
+                        onChange={e => updateAvailability('calendarLink', e.target.value)}
+                      />
+                      <p className="text-xs text-muted-foreground">El bot enviará este link al cliente para que elija su horario.</p>
+                    </div>
+                  )}
+
+                  <div className="space-y-1.5">
+                    <Label>
+                      Máximo de citas por día
+                      <span className="text-muted-foreground font-normal text-xs ml-1">(opcional)</span>
+                    </Label>
+                    <Input
+                      placeholder="Ej. 8"
+                      type="number"
+                      min="1"
+                      value={wizard.availability.maxPerDay}
+                      onChange={e => updateAvailability('maxPerDay', e.target.value)}
+                    />
+                  </div>
+                </Card>
+              </div>
+            )}
+            {/* ── Fin bloque appoint ────────────────────────────────────────── */}
+
             <div className="flex gap-3">
               <Button variant="outline" className="flex-1" onClick={() => setWizardStep(1)}>← Atrás</Button>
               <Button
                 className="flex-1"
-                disabled={!wizard.businessName.trim() || !wizard.businessType.trim()}
+                disabled={
+                  !wizard.businessName.trim() ||
+                  !wizard.businessType.trim() ||
+                  // Si es appoint y eligió link, el link es obligatorio
+                  (wizard.objective === 'appoint' && wizard.availability.bookingMode === 'link' && !wizard.availability.calendarLink.trim())
+                }
                 onClick={() => setWizardStep(3)}
               >
                 Continuar →
@@ -515,6 +891,7 @@ export default function TabPrompt({ companyId }: { companyId: string }) {
           </div>
         )}
 
+        {/* ── PASO 3: Catálogo — con campos extra si es appoint ──────────── */}
         {wizardStep === 3 && (
           <div className="space-y-4">
             <div>
@@ -535,7 +912,7 @@ export default function TabPrompt({ companyId }: { companyId: string }) {
                 <Card key={item.id} className="p-4 space-y-3">
                   <div className="flex items-center justify-between">
                     <span className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
-                      Opción {idx + 1}
+                      {wizard.objective === 'appoint' ? `Servicio ${idx + 1}` : `Opción ${idx + 1}`}
                     </span>
                     {wizard.catalogItems.length > 1 && (
                       <button
@@ -549,10 +926,7 @@ export default function TabPrompt({ companyId }: { companyId: string }) {
 
                   <div className="space-y-1.5">
                     <Label>
-                      {wizard.objective === 'faq'     ? 'Nombre del tema' :
-                       wizard.objective === 'appoint' ? 'Nombre del servicio o cita' :
-                       wizard.objective === 'course'  ? 'Nombre del curso o membresía' :
-                       'Nombre del producto o servicio'}
+                      {wizard.objective === 'appoint' ? 'Nombre del servicio o cita' : 'Nombre del producto o servicio'}
                       <span className="text-muted-foreground font-normal text-xs ml-1">(aparece en el menú)</span>
                     </Label>
                     <Input
@@ -573,6 +947,53 @@ export default function TabPrompt({ companyId }: { companyId: string }) {
                       onChange={e => updateCatalogItem(item.id, 'benefit', e.target.value)}
                     />
                   </div>
+
+                  {/* ── Campos extra para appoint ─────────────────────────────── */}
+                  {wizard.objective === 'appoint' && (
+                    <>
+                      <div className="space-y-2">
+                        <Label>Duración de la cita</Label>
+                        <div className="flex flex-wrap gap-2">
+                          {APPOINTMENT_DURATION.map(dur => (
+                            <button
+                              key={dur.value}
+                              type="button"
+                              onClick={() => updateCatalogItem(item.id, 'duration', dur.value)}
+                              className={`px-3 py-1.5 rounded-lg border text-xs font-medium transition-all ${
+                                item.duration === dur.value
+                                  ? 'border-foreground bg-foreground/5'
+                                  : 'border-border hover:border-foreground/40'
+                              }`}
+                            >
+                              {dur.label}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+
+                      <div className="space-y-2">
+                        <Label>Modalidad</Label>
+                        <div className="grid grid-cols-3 gap-2">
+                          {APPOINTMENT_MODALITY.map(mod => (
+                            <button
+                              key={mod.value}
+                              type="button"
+                              onClick={() => updateCatalogItem(item.id, 'modality', mod.value)}
+                              className={`p-2.5 rounded-lg border text-left transition-all ${
+                                item.modality === mod.value
+                                  ? 'border-foreground bg-foreground/5'
+                                  : 'border-border hover:border-foreground/40'
+                              }`}
+                            >
+                              <p className="text-xs font-medium">{mod.label}</p>
+                              <p className="text-xs text-muted-foreground mt-0.5 leading-tight">{mod.desc}</p>
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    </>
+                  )}
+                  {/* ── Fin campos extra appoint ──────────────────────────────── */}
 
                   <div className="space-y-2">
                     <Label>Precio</Label>
@@ -612,7 +1033,9 @@ export default function TabPrompt({ companyId }: { companyId: string }) {
                   </div>
 
                   <div className="space-y-1.5">
-                    <Label>Siguiente paso del cliente</Label>
+                    <Label>
+                      {wizard.objective === 'appoint' ? 'Confirmación / siguiente paso' : 'Siguiente paso del cliente'}
+                    </Label>
                     <Input
                       placeholder={getNextStepPlaceholder(wizard.objective)}
                       value={item.nextStep}
@@ -626,7 +1049,7 @@ export default function TabPrompt({ companyId }: { companyId: string }) {
                 onClick={addCatalogItem}
                 className="w-full flex items-center justify-center gap-2 p-3 rounded-xl border border-dashed border-border text-sm text-muted-foreground hover:border-foreground/40 hover:text-foreground transition-all"
               >
-                + Agregar otra opción
+                + Agregar {wizard.objective === 'appoint' ? 'otro servicio' : 'otra opción'}
               </button>
             </div>
 
@@ -655,6 +1078,7 @@ export default function TabPrompt({ companyId }: { companyId: string }) {
           </div>
         )}
 
+        {/* ── PASO 4: Personalidad — sin cambios ──────────────────────────── */}
         {wizardStep === 4 && (
           <div className="space-y-4">
             <div>
@@ -713,13 +1137,22 @@ export default function TabPrompt({ companyId }: { companyId: string }) {
               <div className="space-y-1.5">
                 <Label>
                   Número del asesor humano{' '}
-                  <span className="text-muted-foreground font-normal text-xs">(opcional — si el bot no puede resolver)</span>
+                  <span className="text-muted-foreground font-normal text-xs">
+                    {wizard.objective === 'appoint'
+                      ? '(recomendado — para recibir resumen de citas)'
+                      : '(opcional — si el bot no puede resolver)'}
+                  </span>
                 </Label>
                 <Input
                   placeholder="529991234567 (con código de país, sin +)"
                   value={wizard.transferPhone}
                   onChange={e => setWizard(w => ({ ...w, transferPhone: e.target.value }))}
                 />
+                {wizard.objective === 'appoint' && (
+                  <p className="text-xs text-muted-foreground">
+                    El bot enviará un aviso a este número cada vez que un cliente complete el flujo de agendamiento.
+                  </p>
+                )}
               </div>
 
               <button
@@ -824,9 +1257,8 @@ export default function TabPrompt({ companyId }: { companyId: string }) {
 
       {hasConfig && (
         <>
-          {/* ── SECCIÓN 1: Objetivo activo (lo más importante, arriba) ────────── */}
+          {/* ── SECCIÓN 1: Objetivo activo ────────────────────────────────── */}
           <div className="space-y-3">
-            {/* Cabecera con contexto */}
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
@@ -838,7 +1270,6 @@ export default function TabPrompt({ companyId }: { companyId: string }) {
               </div>
             </div>
 
-            {/* Card del objetivo activo — protagonista visual */}
             {activeKnowledge ? (
               <Card className="p-5 border-2 border-foreground bg-foreground/[0.02]">
                 {editingKnowledge?.id === activeKnowledge.id ? (
@@ -885,7 +1316,6 @@ export default function TabPrompt({ companyId }: { companyId: string }) {
                       </div>
                     </div>
 
-                    {/* Conexión visual hacia la personalidad */}
                     <div className="pt-2 border-t border-border/60">
                       <p className="text-xs text-muted-foreground">
                         🤖 <span className="font-medium text-foreground">{config.bot_name || 'Tu bot'}</span> usa este objetivo para saber qué responder — con tono <span className="font-medium text-foreground">{TONES.find(t => t.id === config.style)?.label ?? TONES.find(t => t.id === 'friendly')?.label}</span> y respuestas <span className="font-medium text-foreground lowercase">{STYLE_OPTIONS.find(s => s.value === config.style)?.label ?? 'medias'}</span>.
@@ -902,7 +1332,7 @@ export default function TabPrompt({ companyId }: { companyId: string }) {
             )}
           </div>
 
-          {/* ── SECCIÓN 2: Personalidad — secundaria, colapsable visualmente ─── */}
+          {/* ── SECCIÓN 2: Personalidad ──────────────────────────────────── */}
           <div className="space-y-3">
             <div className="flex items-center justify-between">
               <div>
@@ -940,7 +1370,7 @@ export default function TabPrompt({ companyId }: { companyId: string }) {
 
           <Separator />
 
-          {/* ── SECCIÓN 3: Otros objetivos disponibles ──────────────────────── */}
+          {/* ── SECCIÓN 3: Otros objetivos ───────────────────────────────── */}
           {inactiveKnowledge.length > 0 && (
             <div className="space-y-3">
               <div>
