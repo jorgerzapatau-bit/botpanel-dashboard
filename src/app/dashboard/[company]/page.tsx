@@ -15,6 +15,7 @@ import TabPrompt from '@/components/TabPrompt'
 import TabFlows from '@/components/TabFlows'
 import TabHistory from '@/components/TabHistory'
 import TabWhatsApp from '@/components/TabWhatsApp'
+import TabAgenda from '@/components/TabAgenda'
 
 type Subscription = {
   id: string
@@ -212,6 +213,12 @@ export default function DashboardPage() {
             >
               WhatsApp
             </TabsTrigger>
+            <TabsTrigger
+              value="agenda"
+              className={`flex-1 ${!isActive ? 'opacity-40 cursor-not-allowed' : ''}`}
+            >
+              Agenda
+            </TabsTrigger>
           </TabsList>
 
           <TabsContent value="dashboard">
@@ -245,6 +252,12 @@ export default function DashboardPage() {
           <TabsContent value="whatsapp">
             {isActive
               ? <TabWhatsApp companyId={company!.id} />
+              : <LockedTab reason={lockedReason} />}
+          </TabsContent>
+
+          <TabsContent value="agenda">
+            {isActive
+              ? <TabAgenda companyId={company!.id} />
               : <LockedTab reason={lockedReason} />}
           </TabsContent>
         </Tabs>
