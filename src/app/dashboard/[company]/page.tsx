@@ -59,6 +59,7 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(true)
   const [activeTab, setActiveTab] = useState('dashboard')
   const [historyDateFilter, setHistoryDateFilter] = useState<string | null>(null)
+  const [agendaEnabled, setAgendaEnabled] = useState(false)
 
   useEffect(() => {
     const init = async () => {
@@ -80,6 +81,14 @@ export default function DashboardPage() {
       }
 
       setCompany(data)
+
+      // Fetch agenda_enabled from bot_config
+      const { data: cfg } = await supabase
+        .from('bot_config')
+        .select('agenda_enabled')
+        .eq('company_id', data.id)
+        .single()
+      if (cfg?.agenda_enabled) setAgendaEnabled(true)
 
       // Fetch active subscription
       const { data: subs } = await supabase
@@ -213,12 +222,14 @@ export default function DashboardPage() {
             >
               WhatsApp
             </TabsTrigger>
-            <TabsTrigger
-              value="agenda"
-              className={`flex-1 ${!isActive ? 'opacity-40 cursor-not-allowed' : ''}`}
-            >
-              Agenda
-            </TabsTrigger>
+            {agendaEnabled && (
+              <TabsTrigger
+                value="agenda"
+                className={`flex-1 ${!isActive ? 'opacity-40 cursor-not-allowed' : ''}`}
+              >
+                Agenda
+              </TabsTrigger>
+            )}
           </TabsList>
 
           <TabsContent value="dashboard">
@@ -255,11 +266,13 @@ export default function DashboardPage() {
               : <LockedTab reason={lockedReason} />}
           </TabsContent>
 
-          <TabsContent value="agenda">
-            {isActive
-              ? <TabAgenda companyId={company!.id} />
-              : <LockedTab reason={lockedReason} />}
-          </TabsContent>
+          {agendaEnabled && (
+            <TabsContent value="agenda">
+              {isActive
+                ? <TabAgenda companyId={company!.id} />
+                : <LockedTab reason={lockedReason} />}
+            </TabsContent>
+          )}
         </Tabs>
       </main>
     </div>

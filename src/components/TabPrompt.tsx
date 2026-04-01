@@ -687,6 +687,7 @@ export default function TabPrompt({ companyId }: { companyId: string }) {
       transfer_message: wizard.transferPhone
         ? '👋 Con gusto te transfiero con un asesor que puede ayudarte mejor:'
         : null,
+      agenda_enabled: wizard.objective === 'appoint',
       updated_at: new Date().toISOString(),
     }, { onConflict: 'company_id' })
 
